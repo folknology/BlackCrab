@@ -6,9 +6,9 @@
 extern crate panic_itm;
 
 use cortex_m_rt::entry;
-use stm32f7::stm32f730 as pac;
-use stm32f7::stm32f730::interrupt;
-use stm32f7xx_hal::prelude::*;
+// use stm32f7::stm32f730 as pac;
+use stm32f7::stm32f730::{interrupt, EXTI};
+use stm32f7xx_hal::{pac, prelude::*};
 use stm32f7xx_hal::gpio::{ExtiPin, Edge, Input, Floating};
 use cortex_m::interrupt::{Mutex, free};
 use core::cell::{Cell, RefCell};
@@ -26,14 +26,11 @@ fn main() -> ! {
     //let cp = cortex_m::Peripherals::take().unwrap();
     let p = pac::Peripherals::take().unwrap();
 
-    let mut exti = p.EXTI;
+    let mut exti :EXTI  = p.EXTI;
     let mut syscfg = p.SYSCFG;
 
     // Constrain clocking registers
-    let rcc = p.RCC.constrain();
-
-    // Configure clock and freeze it
-    let _clocks = rcc.cfgr.sysclk(216.mhz()).freeze();
+    let mut rcc = p.RCC;
 
     // Grab the GPIOB Port and the mode/status leds on pins PB12/13
     let gpiob = p.GPIOB.split();
@@ -41,9 +38,12 @@ fn main() -> ! {
     let mut status_led = gpiob.pb13.into_push_pull_output();
     let mut mode_button = gpiob.pb7.into_floating_input();
 
-    mode_button.make_interrupt_source(&mut syscfg);
-    mode_button.trigger_on_edge(&mut exti, Edge::RISING);
+    mode_button.make_interrupt_source(&mut syscfg, &mut rcc);
+    mode_button.trigger_on_edge(&mut exti, Edge::Rising);
     mode_button.enable_interrupt(&mut exti);
+
+    // Configure clock and freeze it
+    let _clocks = rcc.constrain().cfgr.sysclk(216.mhz()).freeze();
 
     // Save info in global
     free(|cs| {
@@ -55,17 +55,17 @@ fn main() -> ! {
         NVIC::unmask(pac::Interrupt::EXTI9_5);
     }
     // Set status green led on
-    status_led.set_low().ok();
+    status_led.set_high().ok();
     // Set mode amber led off
     mode_led.set_high().ok();
 
     loop {
         free(|cs| {
             if SEMAPHORE.borrow(cs).get() == false {
-                if let Ok(true) = mode_led.is_low() {
+                if let Ok(true) = mode_led.is_high() {
                     mode_led.set_low().ok();
                 } else {
-                    mode_led.is_high().ok();
+                    mode_led.set_high().ok();
                 }
 
                 SEMAPHORE.borrow(cs).set(true);
