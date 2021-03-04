@@ -1,10 +1,10 @@
 ## BlackCrab 3/3/21 plan
-- [ ] Initialise with cargo
-- [ ] Add .cargo/config
-- [ ] Add openocd.cfg
-- [ ] Add openocd.gdb
-- [ ] Add memory.x
-- [ ] Add Cargo.toml
+- [x] Initialise with cargo
+- [x] Add .cargo/config
+- [x] Add openocd.cfg
+- [x] Add openocd.gdb
+- [x] Add memory.x
+- [x] Add Cargo.toml
 - [ ] Get mode led working
 - [ ] Get USB-CDC working
 
