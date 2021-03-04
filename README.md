@@ -122,7 +122,8 @@ $ itmdump -F -f itm.txt
 Hello, from BlackCrab!
 ```
 
-
+## To build and run BlackRab
+ `cargo run --features "stm32f730 rt usb_fs"`
 
   
 
