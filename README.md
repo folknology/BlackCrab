@@ -91,7 +91,7 @@ Add udev rules for ST-Link/open-OCD
 ```
 ### Run OpenOCD
 
-  `openocd -f interface/stlink-v2.cfg -f target/stm32f7x.cfg`
+  `openocd -f interface/stlink-v2.cfg -f extra/IceCore.cfg`
 
 _For WSL you will need to install a Windows executeable for OpenOCD as WSL cannot use the usb ST-Link tool._
 
