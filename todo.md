@@ -5,6 +5,6 @@
 - [x] Add openocd.gdb
 - [x] Add memory.x
 - [x] Add Cargo.toml
-- [ ] Get mode led working
+- [x] Get mode led working
 - [ ] Get USB-CDC working
 
