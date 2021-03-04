@@ -120,7 +120,7 @@ Info : STM32F730R8Tx.cpu: hardware has 8 breakpoints, 4 watchpoints
 ```
 
 ## To build and run BlackCrab
-the first time you may need to add the correct target :
+The first time you may need to add the correct target :
 
  `rustup target add thumbv7em-none-eabihf`
 
