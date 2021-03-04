@@ -115,6 +115,13 @@ Info : using stlink api v2
 Info : Target voltage: 2.915608
 Info : stm32f7x.cpu: hardware has 6 breakpoints, 4 watchpoints'
 ```
+Adding ITM support, whilst in the same dir in a new terminal:
+```
+$ itmdump -F -f itm.txt
+(...)
+Hello, from BlackCrab!
+```
+
 
 
   

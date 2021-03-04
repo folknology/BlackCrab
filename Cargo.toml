@@ -36,6 +36,7 @@ stm32f7 = "0.11.0"
 stm32f7xx-hal = { version = "0.2.0", features = ["stm32f730"] }
 synopsys-usb-otg = { version = "0.2.3", features = ["cortex-m"], optional = true }
 panic-halt = "0.2.0"
+panic-itm = "0.4.2"
 usb-device = "0.2.5"
 usbd-serial = "0.1.0"
 
