@@ -83,10 +83,19 @@ LLVM (http://llvm.org/):
   minicom \
   openocd
 ```
-Add udev rules for ST-Link/open-OCD
+Add new udev rules for ST-Link/open-OCD
 ```
  sudo vi /etc/udev/rules.d/99-openocd.rules
- ATTRS{idVendor}=="0483", ATTRS{idProduct}=="374b", MODE:="0666"
+```
+Add the following line :
+
+ `ATTRS{idVendor}=="0483", ATTRS{idProduct}=="374b", MODE:="0666"`
+
+You may need to adjust the idVendor and  idProduct ids, you can find these by examining `lsusb` output after plugging in yout ST-Linktool
+
+Then reload the rules
+
+```
  sudo udevadm control --reload-rules
 ```
 ### Run OpenOCD
