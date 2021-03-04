@@ -118,14 +118,8 @@ Info : Target voltage: 3.164644
 Error: BUG: can't assert SRST
 Info : STM32F730R8Tx.cpu: hardware has 8 breakpoints, 4 watchpoints
 ```
-Adding ITM support, whilst in the same dir in a new terminal:
-```
-$ itmdump -F -f itm.txt
-(...)
-Hello, from BlackCrab!
-```
 
-## To build and run BlackRab
+## To build and run BlackCrab
  `cargo run --features "stm32f730 rt usb_fs"`
 
   
