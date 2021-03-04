@@ -1,4 +1,4 @@
-#![deny(unsafe_code)]
+//#![deny(unsafe_code)]
 #![deny(warnings)]
 #![no_main]
 #![no_std]
@@ -7,36 +7,81 @@ extern crate panic_itm;
 
 use cortex_m_rt::entry;
 use stm32f7::stm32f730 as pac;
-use stm32f7xx_hal::{delay::Delay, prelude::*};
+use stm32f7::stm32f730::interrupt;
+use stm32f7xx_hal::prelude::*;
+use stm32f7xx_hal::gpio::{ExtiPin, Edge, Input, Floating};
+use cortex_m::interrupt::{Mutex, free};
+use core::cell::{Cell, RefCell};
+use stm32f7xx_hal::gpio::gpiob::PB7;
+use cortex_m::peripheral::NVIC;
+
+// Syhchronisation
+static SEMAPHORE: Mutex<Cell<bool>> = Mutex::new(Cell::new(true));
+//Mutexed resource
+static BUTTON_PIN: Mutex<RefCell<Option<PB7<Input<Floating>>>>> = Mutex::new(RefCell::new(None));
 
 #[entry]
 fn main() -> ! {
     // Take control of the peripherals
-    let cp = cortex_m::Peripherals::take().unwrap();
+    //let cp = cortex_m::Peripherals::take().unwrap();
     let p = pac::Peripherals::take().unwrap();
 
-    // Grab the GPIOB Port and the mode/status leds on pins PB12/13
-    let gpiob = p.GPIOB.split();
-    let mut mode_led = gpiob.pb12.into_push_pull_output();
-    let mut status_led = gpiob.pb13.into_push_pull_output();
+    let mut exti = p.EXTI;
+    let mut syscfg = p.SYSCFG;
 
     // Constrain clocking registers
     let rcc = p.RCC.constrain();
 
     // Configure clock and freeze it
-    let clocks = rcc.cfgr.sysclk(216.mhz()).freeze();
+    let _clocks = rcc.cfgr.sysclk(216.mhz()).freeze();
 
-    // Get delay provider
-    let mut delay = Delay::new(cp.SYST, clocks);
+    // Grab the GPIOB Port and the mode/status leds on pins PB12/13
+    let gpiob = p.GPIOB.split();
+    let mut mode_led = gpiob.pb12.into_push_pull_output();
+    let mut status_led = gpiob.pb13.into_push_pull_output();
+    let mut mode_button = gpiob.pb7.into_floating_input();
+
+    mode_button.make_interrupt_source(&mut syscfg);
+    mode_button.trigger_on_edge(&mut exti, Edge::RISING);
+    mode_button.enable_interrupt(&mut exti);
+
+    // Save info in global
+    free(|cs| {
+        BUTTON_PIN.borrow(cs).replace(Some(mode_button))
+    });
+
+    // Enable interrupt
+    unsafe {
+        NVIC::unmask(pac::Interrupt::EXTI9_5);
+    }
+    // Set status green led on
+    status_led.set_low().ok();
+    // Set mode amber led off
+    mode_led.set_high().ok();
 
     loop {
-        // Alternate the mode and status leds
-        mode_led.set_high().ok();
-        status_led.set_low().ok();
-        delay.delay_ms(200_u16);
+        free(|cs| {
+            if SEMAPHORE.borrow(cs).get() == false {
+                if let Ok(true) = mode_led.is_low() {
+                    mode_led.set_low().ok();
+                } else {
+                    mode_led.is_high().ok();
+                }
 
-        mode_led.set_low().ok();
-        status_led.set_high().ok();
-        delay.delay_ms(200_u16);
+                SEMAPHORE.borrow(cs).set(true);
+            }
+        })
     }
+}
+
+#[interrupt]
+fn EXTI9_5() {
+    free(|cs| {
+        match BUTTON_PIN.borrow(cs).borrow_mut().as_mut() {
+            Some(b) => b.clear_interrupt_pending_bit(),
+            // Never here
+            None => (),
+        }
+        SEMAPHORE.borrow(cs).set(false);
+    })
 }
