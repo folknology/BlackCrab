@@ -98,22 +98,25 @@ _For WSL you will need to install a Windows executeable for OpenOCD as WSL canno
 you should see something like:
 
 ```
-Open On-Chip Debugger 0.10.0
+stlink-V2.cfg -f .\IceCore.cfg
+Open On-Chip Debugger 0.10.0 (2019-07-15) [https://github.com/sysprogs/openocd]
 Licensed under GNU GPL v2
 For bug reports, read
         http://openocd.org/doc/doxygen/bugs.html
-Info : auto-selecting first available session transport "hla_swd". To override use 'transport select <transport>'.
-adapter speed: 1000 kHz
-adapter_nsrst_delay: 100
+WARNING: interface/stlink-v2.cfg is deprecated, please switch to interface/stlink.cfg
+WARNING: interface/stlink-v2.cfg is deprecated, please switch to interface/stlink.cfg
+Warn : Interface already configured, ignoring
+Error: already specified hl_layout stlink
 Info : The selected transport took over low-level target control. The results might differ compared to plain JTAG/SWD
 none separate
-Info : Unable to match requested speed 1000 kHz, using 950 kHz
-Info : Unable to match requested speed 1000 kHz, using 950 kHz
-Info : clock speed 950 kHz
-Info : STLINK v2 JTAG v27 API v2 SWIM v15 VID 0x0483 PID 0x374B
-Info : using stlink api v2
-Info : Target voltage: 2.915608
-Info : stm32f7x.cpu: hardware has 6 breakpoints, 4 watchpoints'
+
+Info : Listening on port 6666 for tcl connections
+Info : Listening on port 4444 for telnet connections
+Info : clock speed 2000 kHz
+Info : STLINK V2J21S4 (API v2) VID:PID 0483:3748
+Info : Target voltage: 3.164644
+Error: BUG: can't assert SRST
+Info : STM32F730R8Tx.cpu: hardware has 8 breakpoints, 4 watchpoints
 ```
 Adding ITM support, whilst in the same dir in a new terminal:
 ```
