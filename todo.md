@@ -5,9 +5,10 @@
 - [x] Add openocd.gdb
 - [x] Add memory.x
 - [x] Add Cargo.toml
-## BlackCrab Stream Pt.2 4/3/21 plan
+## BlackCrab Stream Pt.2 4/3/21 recap
 - [x] Get Mode & Status leds operational (review)
-- [ ] Get Mode button working via interrupt
+- [x] Get Mode button working via interrupt
+## BlackCrab Stream Pt.2 5/3/21 plan
 - [ ] Get USB-CDC receiving and transmitting
 - [ ] Get USB-CDC receiving via interrupt calls
 
