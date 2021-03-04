@@ -4,12 +4,12 @@ Next gen software for heterogeneous embedded development boards
 Before the new boards are available we will Initially be targeting the existing MyStorm IceCore SOM for experimentation.
 
 Required setup:
-Rust 1.31 or a newer toolchain.
+Rust 1.50 or a newer toolchain.
 * itmdump >=0.3.1 (cargo install itm). Tested versions: 0.3.1.
 * OpenOCD >=0.8. Tested versions: v0.9.0 and v0.10.0
-* arm-none-eabi-gdb. Version 7.12 or newer highly recommended. Tested versions: 7.10, 7.11, 7.12 and 8.1
+* gdb-multiarch. Tested versions: 8.1
 * cargo-binutils. Version 0.1.4 or newer.
-* minicom on Linux and macOS. Tested version: 2.7. Readers report that picocom also works but we'll use minicom in this text.
+* minicom on Linux and macOS.
 * PuTTY on Windows.
 
 ### rustc & Cargo
@@ -18,7 +18,7 @@ Install rustup by following the instructions at https://rustup.rs.
 If you already have rustup installed double check that you are on the stable channel and your stable toolchain is up to date. rustc -V should return a date newer than the one shown below:
 ```
  $ rustc -V
- rustc 1.31.0 (abe02cefd 2018-12-04)
+ rustc 1.50.0 (cb75ad5db 2021-02-10)
 ``` 
 
 ###  itmdump
