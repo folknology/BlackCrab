@@ -9,11 +9,15 @@ use cortex_m_rt::entry;
 // use stm32f7::stm32f730 as pac;
 use stm32f7::stm32f730::{interrupt, EXTI};
 use stm32f7xx_hal::{pac, prelude::*};
+use stm32f7xx_hal::otg_fs::{UsbBus, USB};
+// use stm32f7::stm32f730::Interrupt::OTG_FS;
+use stm32f7xx_hal::rcc::{HSEClock, HSEClockMode};
 use stm32f7xx_hal::gpio::{ExtiPin, Edge, Input, Floating};
 use cortex_m::interrupt::{Mutex, free};
 use core::cell::{Cell, RefCell};
 use stm32f7xx_hal::gpio::gpiob::PB7;
 use cortex_m::peripheral::NVIC;
+use usb_device::prelude::*;
 
 // Syhchronisation
 static SEMAPHORE: Mutex<Cell<bool>> = Mutex::new(Cell::new(true));
@@ -43,7 +47,37 @@ fn main() -> ! {
     mode_button.enable_interrupt(&mut exti);
 
     // Configure clock and freeze it
-    let _clocks = rcc.constrain().cfgr.sysclk(216.mhz()).freeze();
+    let clocks = rcc.constrain()
+        .cfgr
+        .hse(HSEClock::new(25.mhz(), HSEClockMode::Oscillator))
+        .use_pll()
+        .use_pll48clk()
+        .sysclk(216.mhz())
+        .freeze();
+
+    let gpioa = p.GPIOA.split();
+
+    let usb = USB::new(
+        p.OTG_FS_GLOBAL,
+        p.OTG_FS_DEVICE,
+        p.OTG_FS_PWRCLK,
+        (
+            gpioa.pa11.into_alternate_af10(),
+            gpioa.pa12.into_alternate_af10(),
+        ),
+        clocks,
+    );
+
+    static mut EP_MEMORY: [u32; 1024] = [0; 1024];
+    let usb_bus = UsbBus::new(usb, unsafe {&mut EP_MEMORY});
+    let mut serial = usbd_serial::SerialPort::new(&usb_bus);
+    let mut usb_dev = UsbDeviceBuilder::new(&usb_bus,UsbVidPid(0x16c0, 0x27dd))
+        .manufacturer("myStorm")
+        .product("IceCore")
+        .serial_number("1234")
+        .device_class(usbd_serial::USB_CLASS_CDC)
+        .max_packet_size_0(64)
+        .build();
 
     // Save info in global
     free(|cs| {
@@ -60,6 +94,7 @@ fn main() -> ! {
     mode_led.set_high().ok();
 
     loop {
+
         free(|cs| {
             if SEMAPHORE.borrow(cs).get() == false {
                 if let Ok(true) = mode_led.is_high() {
@@ -70,7 +105,35 @@ fn main() -> ! {
 
                 SEMAPHORE.borrow(cs).set(true);
             }
-        })
+        });
+
+        if !usb_dev.poll(&mut [&mut serial]) {
+            continue;
+        }
+
+        let mut buf: [u8; 512] = [0u8; 512];
+
+        match serial.read(&mut buf) {
+            Ok(count) if count > 0 => {
+                for c in buf[0..count].iter_mut() {
+                    if 0x61 <= *c && *c <= 0x7a {
+                        *c &= !0x20;
+                    }
+                }
+
+                let mut write_offset = 0;
+                while write_offset < count {
+                    match serial.write(&buf[write_offset..count]) {
+                        Ok(len) if len > 0 => {
+                            write_offset += len;
+                        }
+                        _ => {}
+                    }
+                }
+
+            }
+            _ => {}
+        }
     }
 }
 
