@@ -9,6 +9,6 @@
 - [x] Get Mode & Status Leds operational (review)
 - [x] Get Mode button working via interrupt
 ## BlackCrab Stream Pt.2 5/3/21 plan
-- [ ] Get USB-CDC receiving and transmitting
+- [x] Get USB-CDC receiving and transmitting
 - [ ] Get USB-CDC receiving via interrupt calls
 
