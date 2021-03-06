@@ -10,5 +10,5 @@
 - [x] Get Mode button working via interrupt
 ## BlackCrab Stream Pt.2 5/3/21 plan
 - [x] Get USB-CDC receiving and transmitting
-- [ ] Get USB-CDC receiving via interrupt calls
+- [x] Get USB-CDC receiving via interrupt calls
 
