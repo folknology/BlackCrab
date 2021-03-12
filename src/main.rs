@@ -91,9 +91,9 @@ impl UsbSerial {
             } else {
                 self.mosi.set_low().ok();
             }
-            self.delay.delay_us(10_u8);
+            self.delay.delay_us(1_u8);
             self.sck.set_high().ok();
-            self.delay.delay_us(10_u8);
+            self.delay.delay_us(1_u8);
         }
         self.sck.set_low().ok();
         // self.ss.set_high().ok();
