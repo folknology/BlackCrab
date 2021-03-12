@@ -32,6 +32,7 @@ use embedded_hal::timer::{CountDown, Periodic};
 use embedded_hal::digital::v2::{InputPin, OutputPin};
 use stm32f7xx_hal::gpio::gpiod::PD2;
 use stm32f7xx_hal::delay::Delay;
+use stm32f7xx_hal::rcc::RccExt;
 // use embedded_hal::spi::FullDuplex;
 
 trait TimerTrait: CountDown + Periodic {}
@@ -154,6 +155,21 @@ static BUTTON_SEMAPHORE: Mutex<Cell<bool>> = Mutex::new(Cell::new(true));
 //Mutexed button
 static BUTTON_PIN: Mutex<RefCell<Option<PB7<Input<Floating>>>>> = Mutex::new(RefCell::new(None));
 
+// fn configure_mco(rcc: &mut stm32f7::stm32f730::RCC, port: &mut stm32f7::stm32f730::GPIOA) {
+//     const MODE_OUTPUT_50MHz: u8 = 0b11;
+//     const CNF_AF_OUTPUT_PUSHPULL: u8 = 0b10;
+//     // enable port clock
+//     rcc.apb2enr.modify(|_r, w| w.iopaen().set_bit());
+//     // configure port mode and enable alternate function
+//     port.crh.modify(|_r, w| unsafe { port.
+//         w
+//             .mode8().bits(MODE_OUTPUT_50MHz)
+//             .cnf8().bits(CNF_AF_OUTPUT_PUSHPULL)
+//     });
+//     // enable MCO alternate function (PA8)
+//     rcc.cfgr.modify(|_r, w| w.mco1().sysclk());
+// }
+
 #[entry]
 fn main() -> ! {
     // Take control of the peripherals
@@ -201,7 +217,8 @@ fn main() -> ! {
         .freeze();
 
     let mut delay = Delay::new(cp.SYST, clocks);
-    // let tmr = stm32f7xx_hal::timer::Timer::tim3(p.TIM3, 6.mhz(), clocks, &mut rcc_constrain.apb1);
+    // let mut c1_no_pins = tim3(p.TIM3, 9000, 25.mhz(), clocks);
+    // let mut ch1 = c1_no_pins.
     //
     // let mut spi = SPI::new(MODE_0, miso, mosi, sck, tmr);
 
@@ -246,6 +263,7 @@ fn main() -> ! {
     // }
 
     let gpioa = p.GPIOA.split();
+    gpioa.pa8.into_alternate_af0();
 
     let usb = USB::new(
         p.OTG_FS_GLOBAL,
@@ -259,6 +277,13 @@ fn main() -> ! {
     );
 
     UsbSerial::setup(usb, sck, mosi, ss, delay);
+
+    // let peripherals = stm32f7::stm32f730::Peripherals::take().unwrap();
+    // let rccp = peripherals.RCC;
+    // // let mut port_a = peripherals.GPIOA;
+    // rccp.cfgr.modify(|_r, w| w.mco1().variant(stm32f7::stm32f730::rcc::cfgr::MCO1_A::HSE));
+
+    // configure_mco(&mut rccp, &mut port_a);
 
     // Save info in global
     free(|cs| {
