@@ -49,6 +49,7 @@ pub struct UsbSerial {
     ss: PD2<Output<PushPull>>,
     delay: Delay,
     header: bool,
+    byte_count:u32,
 }
 
 impl UsbSerial {
@@ -67,7 +68,7 @@ impl UsbSerial {
             .build();
 
         free(|_| {
-            unsafe { USB_SERIAL = Some(UsbSerial {serial, device, sck, mosi, ss, delay, header: true }); }
+            unsafe { USB_SERIAL = Some(UsbSerial {serial, device, sck, mosi, ss, delay, header: true, byte_count: 0 }); }
         });
 
         unsafe {
@@ -80,7 +81,7 @@ impl UsbSerial {
     }
 
     pub fn send(&mut self, byte: u8){
-        self.ss.set_low().ok();
+        // self.ss.set_low().ok();
         for bit_offset in 0..8 {
             self.sck.set_low().ok();
             let out_bit = (byte >> (7 - bit_offset)) & 0b1;
@@ -94,7 +95,7 @@ impl UsbSerial {
             self.delay.delay_us(10_u8);
         }
         self.sck.set_low().ok();
-        self.ss.set_high().ok();
+        // self.ss.set_high().ok();
     }
 
     pub fn poll() {
@@ -104,9 +105,11 @@ impl UsbSerial {
 
                 match s.serial.read(&mut buf) {
                     Ok(count) if count > 0 => {
+                        s.byte_count += count as u32;
                         for c in buf[0..count].iter_mut() {
                             if s.header {
                                 if *c == 0x7E as u8 {
+                                    s.ss.set_low().ok();
                                     s.header = false;
                                     s.send(*c);
                                 } else {
@@ -119,6 +122,14 @@ impl UsbSerial {
                             // if 0x61 <= *c && *c <= 0x7a {
                             //     *c &= !0x20;
                             // }
+                        }
+                        if s.byte_count >= 135100 as u32 {
+                            s.header = true;
+                            s.delay.delay_ms(10_u8);
+                            for _ in 0..7 {
+                                s.send(0x00 as u8);
+                            }
+                            s.ss.set_high().ok();
                         }
 
                         // let mut write_offset = 0;
@@ -195,8 +206,8 @@ fn main() -> ! {
     // let mut spi = SPI::new(MODE_0, miso, mosi, sck, tmr);
 
     // prep and reset FPGA, disable Flash chip
-    wp.set_high().ok();
-    hld.set_high().ok();
+    wp.set_low().ok();
+    hld.set_low().ok();
     delay.delay_ms(50_u8);
     ss.set_high().ok();
     reset.set_low().ok();
