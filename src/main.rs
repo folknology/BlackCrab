@@ -18,6 +18,7 @@ use stm32f7xx_hal::rcc::{HSEClock, HSEClockMode};
 use stm32f7xx_hal::gpio::{ExtiPin, Edge, Input, Floating, PushPull, Output};
 use cortex_m::interrupt::{Mutex, free};
 use stm32f7xx_hal::gpio::gpiob::{PB7, PB3, PB4};
+use stm32f7xx_hal::gpio::gpioc::PC13;
 use cortex_m::peripheral::NVIC;
 use usb_device::prelude::*;
 use usbd_serial::SerialPort;
@@ -48,13 +49,18 @@ pub struct UsbSerial {
     sck: PB3<Output<PushPull>>,
     mosi: PB4<Output<PushPull>>,
     ss: PD2<Output<PushPull>>,
+    reset: PC13<Output<PushPull>>,
     delay: Delay,
     header: bool,
     byte_count:u32,
 }
 
 impl UsbSerial {
-    pub fn setup(usb: USB, sck: PB3<Output<PushPull>>, mosi: PB4<Output<PushPull>>, ss: PD2<Output<PushPull>>, delay: Delay) {
+    pub fn setup(usb: USB, sck: PB3<Output<PushPull>>,
+                 mosi: PB4<Output<PushPull>>,
+                 ss: PD2<Output<PushPull>>,
+                 reset: PC13<Output<PushPull>>,
+                 delay: Delay) {
         unsafe { USB_BUS.write(UsbBus::new(usb, &mut EP_MEMORY)) };
         let bus = unsafe { USB_BUS.assume_init_ref() };
         let serial = SerialPort::new(bus);
@@ -69,12 +75,34 @@ impl UsbSerial {
             .build();
 
         free(|_| {
-            unsafe { USB_SERIAL = Some(UsbSerial {serial, device, sck, mosi, ss, delay, header: true, byte_count: 0 }); }
+            unsafe { USB_SERIAL = Some(UsbSerial {serial, device, sck, mosi, ss, reset, delay, header: true, byte_count: 0 }); }
         });
 
         unsafe {
             NVIC::unmask(Interrupt::OTG_FS);
         }
+    }
+
+    pub fn reset(&mut self) {
+        self.ss.set_high().ok();
+        self.reset.set_low().ok();
+        self.ss.set_low().ok();
+        self.delay.delay_ms(1_u8);
+        self.reset.set_high().ok();
+        self.delay.delay_ms(2_u8);
+        self.ss.set_high().ok();
+        self.delay.delay_ms(50_u8);
+
+        self.mosi.set_low().ok();
+        self.sck.set_low().ok();
+        self.ss.set_low().ok();
+        for _ in 0..8 {
+            self.delay.delay_us(10_u8);
+            self.sck.set_high().ok();
+            self.delay.delay_us(10_u8);
+            self.sck.set_low().ok();
+        }
+        self.ss.set_high().ok();
     }
 
     pub fn get() -> Option<&'static mut Self> {
@@ -110,6 +138,7 @@ impl UsbSerial {
                         for c in buf[0..count].iter_mut() {
                             if s.header {
                                 if *c == 0x7E as u8 {
+                                    s.reset();
                                     s.ss.set_low().ok();
                                     s.header = false;
                                     s.send(*c);
@@ -126,6 +155,7 @@ impl UsbSerial {
                         }
                         if s.byte_count >= 135100 as u32 {
                             s.header = true;
+                            s.byte_count = 0;
                             s.delay.delay_ms(10_u8);
                             for _ in 0..7 {
                                 s.send(0x00 as u8);
@@ -192,20 +222,21 @@ fn main() -> ! {
     mode_button.trigger_on_edge(&mut exti, Edge::Rising);
     mode_button.enable_interrupt(&mut exti);
 
-    let mut sck = gpiob.pb3.into_push_pull_output();
+    let sck = gpiob.pb3.into_push_pull_output();
     // let miso = gpiob.pb4.into_floating_input();
     // TODO I think mosi should actually be the miso PB4 here
-    let mut mosi = gpiob.pb4.into_push_pull_output();
+    let mosi = gpiob.pb4.into_push_pull_output();
 
     let gpiod = p.GPIOD.split();
-    let mut ss = gpiod.pd2.into_push_pull_output();
+    let ss = gpiod.pd2.into_push_pull_output();
     let gpioc = p.GPIOC.split();
     let mut hld = gpioc.pc11.into_push_pull_output();
     let mut wp = gpioc.pc12.into_push_pull_output();
-    let mut reset = gpioc.pc13.into_push_pull_output();
+    let reset = gpioc.pc13.into_push_pull_output();
     let mut _done = gpioc.pc8.into_floating_input();
 
     let rcc_constrain = rcc.constrain();
+
 
     // Configure clock and freeze it
     let clocks = rcc_constrain
@@ -222,45 +253,11 @@ fn main() -> ! {
     //
     // let mut spi = SPI::new(MODE_0, miso, mosi, sck, tmr);
 
+    // TODO make this a config/reset function that can also be called by the USBSERIAL
     // prep and reset FPGA, disable Flash chip
     wp.set_low().ok();
     hld.set_low().ok();
     delay.delay_ms(50_u8);
-    ss.set_high().ok();
-    reset.set_low().ok();
-    ss.set_low().ok();
-    delay.delay_ms(1_u8);
-    reset.set_high().ok();
-    delay.delay_ms(2_u8);
-    ss.set_high().ok();
-    delay.delay_ms(50_u8);
-
-    mosi.set_low().ok();
-    sck.set_low().ok();
-    ss.set_low().ok();
-    for _ in 0..8 {
-        delay.delay_us(10_u8);
-        sck.set_high().ok();
-        delay.delay_us(10_u8);
-        sck.set_low().ok();
-    }
-    ss.set_high().ok();
-
-    // reset.set_low().ok();
-    // ss.set_low().ok();
-    // delay.delay_ms(50_u8);
-    // reset.set_high().ok();
-    // delay.delay_ms(50_u8);
-    // ss.set_high().ok();
-    //delay
-    // check done wait
-    // delay.delay_ms(50_u8);
-    // wp.set_high().ok();
-    // hld.set_high().ok();
-
-    // for byte in b"Hello, World!" {
-    //     block!(spi.send(*byte)).unwrap();
-    // }
 
     let gpioa = p.GPIOA.split();
     gpioa.pa8.into_alternate_af0();
@@ -276,7 +273,7 @@ fn main() -> ! {
         clocks,
     );
 
-    UsbSerial::setup(usb, sck, mosi, ss, delay);
+    UsbSerial::setup(usb, sck, mosi, ss, reset, delay);
 
     // let peripherals = stm32f7::stm32f730::Peripherals::take().unwrap();
     // let rccp = peripherals.RCC;
