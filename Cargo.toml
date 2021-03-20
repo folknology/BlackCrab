@@ -41,6 +41,7 @@ panic-itm = "0.4.2"
 usb-device = "0.2.5"
 usbd-serial = "0.1.0"
 bitbang-hal = { git = "https://github.com/sajattack/bitbang-hal.git" }
+cortex-m-rtic = "0.5.6"
 
 [features]
 device-selected = []
