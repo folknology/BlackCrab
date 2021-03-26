@@ -4,21 +4,13 @@
 #![no_std]
 
 extern crate panic_itm;
-
-use rtic::app;
-use stm32f7::stm32f730::{EXTI};
-use stm32f7xx_hal::{pac, prelude::*};
-use stm32f7xx_hal::otg_fs::{UsbBus, USB, UsbBusType};
-use stm32f7xx_hal::rcc::{HSEClock, HSEClockMode};
-use stm32f7xx_hal::gpio::{ExtiPin, Edge, PushPull, Output};
+use rtic::{app};
 use stm32f7xx_hal::gpio::gpiob::{PB3, PB4};
 use stm32f7xx_hal::gpio::gpioc::PC13;
-use usb_device::prelude::*;
-use usb_device::class_prelude::UsbBusAllocator;
-use usbd_serial::SerialPort;
 use stm32f7xx_hal::gpio::gpiod::PD2;
 use stm32f7xx_hal::delay::Delay;
-use stm32f7xx_hal::rcc::RccExt;
+use stm32f7xx_hal::gpio::{PushPull, Output};
+use stm32f7xx_hal::prelude::*;
 
 pub struct SoftSpi {
     sck: PB3<Output<PushPull>>,
@@ -28,13 +20,13 @@ pub struct SoftSpi {
     delay: Delay,
 }
 
-impl SoftSpi  {
+impl SoftSpi {
     pub fn new(sck: PB3<Output<PushPull>>,
                mosi: PB4<Output<PushPull>>,
                ss: PD2<Output<PushPull>>,
                reset: PC13<Output<PushPull>>,
                delay: Delay) -> SoftSpi {
-        SoftSpi {sck, mosi, ss, reset, delay}
+        SoftSpi { sck, mosi, ss, reset, delay }
     }
 
     pub fn reset(&mut self) {
@@ -59,13 +51,13 @@ impl SoftSpi  {
         self.ss.set_high().ok();
     }
 
-    pub fn select(&mut self) {self.ss.set_low().ok();}
+    pub fn select(&mut self) { self.ss.set_low().ok(); }
 
-    pub fn deselect(&mut self) {self.ss.set_high().ok();}
+    pub fn deselect(&mut self) { self.ss.set_high().ok(); }
 
-    fn delay_ms(&mut self, ms: u8) {self.delay.delay_ms(ms);}
+    fn delay_ms(&mut self, ms: u8) { self.delay.delay_ms(ms); }
 
-    pub fn send(&mut self, byte: u8){
+    pub fn send(&mut self, byte: u8) {
         // self.ss.set_low().ok();
         for bit_offset in 0..8 {
             self.sck.set_low().ok();
@@ -83,26 +75,45 @@ impl SoftSpi  {
         // self.ss.set_high().ok();
     }
 
-    pub fn transfer(&mut self, byte: u8) {
+    fn transfer(&mut self, byte: u8) {
         self.select();
         self.send(byte);
         self.deselect();
     }
 }
 
-#[app(device = stm32f7xx_hal::pac, peripherals = true)]
-const APP:() = {
-    struct Resources {
+#[app(device = stm32f7xx_hal::pac, peripherals = true, dispatchers = [LP_TIMER1])]
+mod app {
+    use crate::SoftSpi;
+    use crate::Delay;
+    // use crate::{PushPull, Output};
+    use stm32f7::stm32f730::{EXTI};
+    use stm32f7xx_hal::{pac, prelude::*};
+    use stm32f7xx_hal::otg_fs::{UsbBus, USB, UsbBusType};
+    use stm32f7xx_hal::rcc::{HSEClock, HSEClockMode};
+    use usb_device::prelude::*;
+    use usb_device::class_prelude::UsbBusAllocator;
+    use usbd_serial::SerialPort;
+    use stm32f7xx_hal::gpio::{ExtiPin, Edge};
+    use stm32f7xx_hal::rcc::RccExt;
+    use cortex_m;
+
+
+    #[resources]
+    struct MyResources {
+        #[task_local]
         serial: SerialPort<'static, UsbBus<USB>>,
+        #[task_local]
         usb_cdc_device: UsbDevice<'static, UsbBus<USB>>,
         spi: SoftSpi,
         header: bool,
         byte_count:u32,
+        programmed: bool,
     }
 
 
     #[init]
-    fn init(cx: init::Context) -> init::LateResources {
+    fn init(cx: init::Context) -> (init::LateResources, init::Monotonics) {
         static mut EP_MEMORY: [u32; 1024] = [0; 1024];
         static mut USB_BUS: Option<UsbBusAllocator<UsbBusType>> = None;
         // EP_MEM.write(&mut EP_MEMORY);
@@ -121,16 +132,16 @@ const APP:() = {
         let mut mode_led = gpiob.pb12.into_push_pull_output();
         let mut status_led = gpiob.pb13.into_push_pull_output();
         let mut mode_button = gpiob.pb7.into_floating_input();
-    
+
         mode_button.make_interrupt_source(&mut syscfg, &mut rcc);
         mode_button.trigger_on_edge(&mut exti, Edge::Rising);
         mode_button.enable_interrupt(&mut exti);
-    
+
         let sck = gpiob.pb3.into_push_pull_output();
         // let miso = gpiob.pb4.into_floating_input();
         // TODO I think mosi should actually be the miso PB4 here
         let mosi = gpiob.pb4.into_push_pull_output();
-    
+
         let gpiod = device.GPIOD.split();
         let ss = gpiod.pd2.into_push_pull_output();
         let gpioc = device.GPIOC.split();
@@ -138,10 +149,10 @@ const APP:() = {
         let mut wp = gpioc.pc12.into_push_pull_output();
         let reset = gpioc.pc13.into_push_pull_output();
         let mut _done = gpioc.pc8.into_floating_input();
-    
+
         let rcc_constrain = rcc.constrain();
-    
-    
+
+
         // Configure clock and freeze it
         let clocks = rcc_constrain
             .cfgr
@@ -150,7 +161,7 @@ const APP:() = {
             .use_pll48clk()
             .sysclk(216.mhz())
             .freeze();
-    
+
         let mut delay = Delay::new(core.SYST, clocks);
 
         // prep and reset FPGA, disable Flash chip
@@ -195,71 +206,88 @@ const APP:() = {
         mode_led.set_low().ok();
 
         let header: bool = true;
-        let byte_count:u32 = 0;
+        let byte_count: u32 = 0;
+        let programmed: bool = false;
 
         let spi = SoftSpi::new(sck, mosi, ss, reset, delay);
 
-        init::LateResources {
+        // rtic::pend(Interrupt::OTG_FS)
+
+        (init::LateResources {
             serial,
             usb_cdc_device,
             spi,
             header,
             byte_count,
-        }
+            programmed,
+        },
+        init::Monotonics())
+
     }
 
-    #[idle]
-    fn idle(_: idle::Context) -> ! {
-        loop {
-            cortex_m::asm::nop();
-        }
+    #[task(capacity = 2, resources = [programmed, spi])]
+    fn manage(cx: manage::Context) {
+        let spi = cx.resources.spi;
+        let programmed = cx.resources.programmed;
+
+        (programmed, spi).lock(|programmed: &mut bool ,spi: &mut SoftSpi| {
+            if *programmed {
+                //Critical section
+                for count in 0..16 {
+                    spi.transfer(count as u8);
+                    spi.delay_ms(100);
+                }
+            }
+        });
     }
 
-    #[task(binds = OTG_FS, resources = [serial, usb_cdc_device, spi, header, byte_count])]
+    #[task(binds = OTG_FS, resources = [serial, usb_cdc_device, spi, header, byte_count, programmed])]
     fn usb_event(cx: usb_event::Context) {
-        let usb_cdc_device: &mut UsbDevice<'static, UsbBus<USB>> = cx.resources.usb_cdc_device;
-        let serial: &mut SerialPort<'static, UsbBus<USB>> = cx.resources.serial;
-        let spi: &mut SoftSpi = cx.resources.spi;
-        let header: &mut bool = cx.resources.header;
-        let byte_count: &mut u32  = cx.resources.byte_count;
+        let usb_cdc_device = cx.resources.usb_cdc_device; //: &mut UsbDevice<'static, UsbBus<USB>>
+        let serial = cx.resources.serial;//: &mut SerialPort<'static, UsbBus<USB>>
+        let spi = cx.resources.spi; //: &mut SoftSpi
+        let header = cx.resources.header;
+        let byte_count = cx.resources.byte_count;
+        let programmed = cx.resources.programmed;
 
         if usb_cdc_device.poll(&mut [serial]) {
             let mut buf: [u8; 512] = [0u8; 512];
 
             match serial.read(&mut buf) {
                 Ok(count) if count > 0 => {
-                    *byte_count += count as u32;
-                    for c in buf[0..count].iter_mut() {
-                        if  *header {
-                            if *c == 0x7E as u8 {
-                                spi.reset();
-                                spi.select();
-                                *header = false;
-                                spi.send(*c);
+                    (header, byte_count, programmed, spi).lock(|header, byte_count, programmed, spi: &mut SoftSpi| {
+                        * byte_count += count as u32;
+                        for c in buf[0..count].iter_mut() {
+                            if *header {
+                                if *c == 0x7E as u8 {
+                                    *programmed = false;
+                                    spi.reset();
+                                    spi.select();
+                                    *header = false;
+                                    spi.send(*c);
+                                } else {
+                                    continue
+                                }
                             } else {
-                                continue
+                                spi.send(*c);
                             }
-                        } else {
-                            spi.send(*c);
                         }
-                    }
-                    if *byte_count >= 135100 as u32 {
-                        *header = true;
-                        *byte_count = 0;
-                        spi.delay_ms(10_u8);
-                        for _ in 0..7 {
-                            spi.send(0x00 as u8);
+                        if *byte_count >= 135100 as u32 {
+                            *header = true;
+                            *byte_count = 0;
+                            spi.delay_ms(10_u8);
+                            for _ in 0..7 {
+                                spi.send(0x00 as u8);
+                            }
+                            spi.deselect();
+                            *programmed = true;
+                            manage::spawn().unwrap();
                         }
-                        spi.deselect();
-                        for count in 0..15 {
-                            spi.delay_ms(100);
-                            spi.transfer(count);
-                        }
-                    }
+                    });
                 }
                 _ => {}
             }
 
         }
     }
-};
+}
