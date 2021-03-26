@@ -63,7 +63,7 @@ impl SoftSpi  {
 
     pub fn deselect(&mut self) {self.ss.set_high().ok();}
 
-    fn delay_ms(&mut self, us: u8) {self.delay.delay_ms(us);}
+    fn delay_ms(&mut self, ms: u8) {self.delay.delay_ms(ms);}
 
     pub fn send(&mut self, byte: u8){
         // self.ss.set_low().ok();
@@ -81,6 +81,12 @@ impl SoftSpi  {
         }
         self.sck.set_low().ok();
         // self.ss.set_high().ok();
+    }
+
+    pub fn transfer(&mut self, byte: u8) {
+        self.select();
+        self.send(byte);
+        self.deselect();
     }
 }
 
@@ -245,6 +251,10 @@ const APP:() = {
                             spi.send(0x00 as u8);
                         }
                         spi.deselect();
+                        for count in 0..15 {
+                            spi.delay_ms(100);
+                            spi.transfer(count);
+                        }
                     }
                 }
                 _ => {}
