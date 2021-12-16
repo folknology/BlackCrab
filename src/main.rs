@@ -94,8 +94,9 @@ mod app {
     use usb_device::prelude::*;
     use usb_device::class_prelude::UsbBusAllocator;
     use usbd_serial::SerialPort;
-    use stm32f7xx_hal::gpio::{ExtiPin, Edge};
+    use stm32f7xx_hal::gpio::{ExtiPin, Edge, Speed};
     use stm32f7xx_hal::rcc::RccExt;
+    use stm32f7xx_hal::qspi::{Qspi, QspiTransaction, QspiWidth};
     use cortex_m;
 
 
@@ -106,6 +107,8 @@ mod app {
         #[task_local]
         usb_cdc_device: UsbDevice<'static, UsbBus<USB>>,
         spi: SoftSpi,
+        #[task_local]
+        qspi_driver: Qspi,
         header: bool,
         byte_count:u32,
         programmed: bool,
@@ -142,6 +145,13 @@ mod app {
         // TODO I think mosi should actually be the miso PB4 here
         let mosi = gpiob.pb4.into_push_pull_output();
 
+        let _dcs = gpiob.pb6.into_alternate_af10()
+            .internal_pull_up(true)
+            .set_speed(Speed::VeryHigh);
+        let _dsck = gpiob.pb2.into_alternate_af9()
+            .internal_pull_up(true)
+            .set_speed(Speed::VeryHigh);
+
         let gpiod = device.GPIOD.split();
         let ss = gpiod.pd2.into_push_pull_output();
         let gpioc = device.GPIOC.split();
@@ -149,6 +159,15 @@ mod app {
         let mut wp = gpioc.pc12.into_push_pull_output();
         let reset = gpioc.pc13.into_push_pull_output();
         let mut _done = gpioc.pc8.into_floating_input();
+
+        let _dd0 = gpioc.pc9.into_alternate_af9()
+            .internal_pull_up(true)
+            .set_speed(Speed::VeryHigh);
+        let _dd1 = gpioc.pc10.into_alternate_af9()
+            .internal_pull_up(true)
+            .set_speed(Speed::VeryHigh);
+
+        let qspi_driver = Qspi::new(&mut rcc, device.QUADSPI, 1, 1);
 
         let rcc_constrain = rcc.constrain();
 
@@ -217,29 +236,60 @@ mod app {
             serial,
             usb_cdc_device,
             spi,
+            qspi_driver,
             header,
             byte_count,
             programmed,
         },
         init::Monotonics())
-
     }
 
-    #[task(capacity = 2, resources = [programmed, spi])]
+    #[idle]
+    fn idle(_cx: idle::Context) -> ! {
+        loop {
+            cortex_m::asm::nop();
+        }
+    }
+
+    #[task(resources = [programmed, spi])]
     fn manage(cx: manage::Context) {
         let spi = cx.resources.spi;
         let programmed = cx.resources.programmed;
 
         (programmed, spi).lock(|programmed: &mut bool ,spi: &mut SoftSpi| {
             if *programmed {
-                //Critical section
                 for count in 0..16 {
-                    spi.transfer(count as u8);
                     spi.delay_ms(100);
+                    spi.transfer(count as u8);
                 }
             }
         });
     }
+
+    #[task(resources = [programmed, qspi_driver])]
+    fn dspi(cx: dspi::Context) {
+        let driver = cx.resources.qspi_driver;
+        let mut programmed = cx.resources.programmed;
+
+        programmed.lock(|programmed: &mut bool| {
+            if *programmed {
+                for count in 0..16 {
+                    let transaction = QspiTransaction {
+                        iwidth: QspiWidth::NONE,
+                        awidth: QspiWidth::NONE,
+                        dwidth: QspiWidth::DUAL,//DUAL
+                        instruction: 0,
+                        address: None,
+                        dummy: 0,
+                        data_len: Some(1),
+                    };
+                    let mut buf = [count];
+                    driver.polling_write(&mut buf, transaction).unwrap();
+                }
+            }
+        });
+    }
+
 
     #[task(binds = OTG_FS, resources = [serial, usb_cdc_device, spi, header, byte_count, programmed])]
     fn usb_event(cx: usb_event::Context) {
@@ -281,7 +331,9 @@ mod app {
                             }
                             spi.deselect();
                             *programmed = true;
-                            manage::spawn().unwrap();
+                            // Maybe add a delay here before sending anything to HDL
+                            //manage::spawn().unwrap();
+                            //dspi::spawn().unwrap();
                         }
                     });
                 }
