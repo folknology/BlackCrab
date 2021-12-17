@@ -1,0 +1,14 @@
+set_io clk L5
+
+set_io led[0] A9
+set_io led[1] C8
+set_io led[2] A8
+set_io led[3] C7
+set_io led[4] A6
+set_io led[5] A5
+set_io led[6] A2
+set_io led[7] A3
+set_io led[8] F11
+set_io led[9] E9
+set_io led[10] E10
+set_io led[11] E8

@@ -1,0 +1,6 @@
+set_io clk L5
+
+set_io led[0] J11 # MTO
+set_io led[1] D7 # G/MT1
+set_io led[2] B7 # B/nWS
+set_io led[3] B6 # R/nDS

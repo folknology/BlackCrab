@@ -22,3 +22,14 @@
 - [x] FPGA write leds via DSPI
 - [x] nMigen DSPI Slave driving leds
 - [x] nMigen PLL to wind up DSPI Clock
+## BlackCrab Stream Ice LogicDeck
+- [x] Assemble, test and bring-up ILD
+- [x] Change Pins and Test programming STM32
+- [x] Bring up USB and program Ice40
+- [x] Test First Tile with Proto led trail
+- [ ] Create ILD PCF
+- [ ] Create ILD Amaranth Board Definition
+- [ ] Refactor the SPI to use STM32 hardware peripheral
+- [ ] Add Flash programming support for Ice40 Images
+- [ ] Move HDL examples from ArachePnr to NextPnr
+- 
