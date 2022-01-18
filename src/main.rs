@@ -170,6 +170,7 @@ mod app {
         let gpiod = device.GPIOD.split();
         let reset = gpiod.pd10.into_push_pull_output();
         let mut _done = gpiod.pd14.into_floating_input();
+        let mut _qdr = gpiod.pd15.into_floating_input();
 
         let _dd0 = gpiod.pd11.into_alternate_af9()
             .internal_pull_up(true)
@@ -300,18 +301,21 @@ mod app {
 
         programmed.lock(|programmed: &mut bool| {
             if *programmed {
-                for count in 0..16 {
-                    let transaction = QspiTransaction {
-                        iwidth: QspiWidth::NONE,
-                        awidth: QspiWidth::NONE,
-                        dwidth: QspiWidth::QUAD,//DUAL
-                        instruction: 0,
-                        address: None,
-                        dummy: 0,
-                        data_len: Some(1),
+                for _runs in 0..4000000 {
+                    for count in 0..255 {
+                        let transaction = QspiTransaction {
+                            iwidth: QspiWidth::NONE,
+                            awidth: QspiWidth::NONE,
+                            dwidth: QspiWidth::QUAD,//DUAL
+                            instruction: 0,
+                            address: None,
+                            dummy: 0,
+                            data_len: Some(2),
+                        };
+
+                        let mut buf = [count,count,count,count];
+                        driver.polling_write(&mut buf, transaction).unwrap();
                     };
-                    let mut buf = [count];
-                    driver.polling_write(&mut buf, transaction).unwrap();
                 }
             }
         });
@@ -360,7 +364,7 @@ mod app {
                             *programmed = true;
                             // Maybe add a delay here before sending anything to HDL
                             //manage::spawn().unwrap();
-                            //dspi::spawn().unwrap();
+                            dspi::spawn().unwrap();
                         }
                     });
                 }

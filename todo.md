@@ -27,9 +27,13 @@
 - [x] Change Pins and Test programming STM32
 - [x] Bring up USB and program Ice40
 - [x] Test First Tile with Proto led trail
-- [ ] Create ILD PCF
-- [ ] Create ILD Amaranth Board Definition
+- [x] Create ILD PCF
+- [x] Create ILD Amaranth Board Definition with movable tiles
+- [x] QSPIE pin test and in particular QDR test
 - [ ] Refactor the SPI to use STM32 hardware peripheral
 - [ ] Add Flash programming support for Ice40 Images
-- [ ] Move HDL examples from ArachePnr to NextPnr
-- 
+- [ ] Move Verilog examples from ArachePnr to NextPnr
+- [ ] DFU option
+- [ ] Uart via USB CDC support
+- [ ] Kicad version of tile the template
+- [ ] Add binary that can be uploaded via DFU-Util
