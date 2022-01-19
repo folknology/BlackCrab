@@ -17,7 +17,7 @@ set print pretty on
 #monitor itm port 0 on
 
 # Set a breakpoint at main
-break main
+#break main
 
 # Continue running and we'll hit the main breakpoint
 continue

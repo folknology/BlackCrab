@@ -1,9 +1,9 @@
-#![deny(unsafe_code)]
+// #![deny(unsafe_code)]
 #![deny(warnings)]
 #![no_main]
 #![no_std]
 
-extern crate panic_itm;
+// extern crate panic_itm;
 use rtic::{app};
 //use stm32f7xx_hal::gpio::gpiob::{PB3, PB4};
 //use stm32f7xx_hal::gpio::gpioc::PC13;
@@ -31,49 +31,49 @@ impl SoftSpi {
     }
 
     pub fn reset(&mut self) {
-        self.ss.set_high().ok();
-        self.reset.set_low().ok();
-        self.ss.set_low().ok();
+        self.ss.set_high();
+        self.reset.set_low();
+        self.ss.set_low();
         self.delay.delay_ms(1_u8);
-        self.reset.set_high().ok();
+        self.reset.set_high();
         self.delay.delay_ms(2_u8);
-        self.ss.set_high().ok();
+        self.ss.set_high();
         self.delay.delay_ms(50_u8);
 
-        self.mosi.set_low().ok();
-        self.sck.set_low().ok();
-        self.ss.set_low().ok();
+        self.mosi.set_low();
+        self.sck.set_low();
+        self.ss.set_low();
         for _ in 0..8 {
             self.delay.delay_us(10_u8);
-            self.sck.set_high().ok();
+            self.sck.set_high();
             self.delay.delay_us(10_u8);
-            self.sck.set_low().ok();
+            self.sck.set_low();
         }
-        self.ss.set_high().ok();
+        self.ss.set_high();
     }
 
-    pub fn select(&mut self) { self.ss.set_low().ok(); }
+    pub fn select(&mut self) { self.ss.set_low(); }
 
-    pub fn deselect(&mut self) { self.ss.set_high().ok(); }
+    pub fn deselect(&mut self) { self.ss.set_high(); }
 
     fn delay_ms(&mut self, ms: u8) { self.delay.delay_ms(ms); }
 
     pub fn send(&mut self, byte: u8) {
-        // self.ss.set_low().ok();
+        // self.ss.set_low();
         for bit_offset in 0..8 {
-            self.sck.set_low().ok();
+            self.sck.set_low();
             let out_bit = (byte >> (7 - bit_offset)) & 0b1;
             if out_bit == 1 {
-                self.mosi.set_high().ok();
+                self.mosi.set_high();
             } else {
-                self.mosi.set_low().ok();
+                self.mosi.set_low();
             }
             self.delay.delay_us(1_u8);
-            self.sck.set_high().ok();
+            self.sck.set_high();
             self.delay.delay_us(1_u8);
         }
-        self.sck.set_low().ok();
-        // self.ss.set_high().ok();
+        self.sck.set_low();
+        // self.ss.set_high();
     }
 
     fn transfer(&mut self, byte: u8) {
@@ -91,7 +91,7 @@ mod app {
     // use stm32f7::stm32f730::{EXTI};
     use stm32f7xx_hal::{pac, prelude::*};
     use stm32f7xx_hal::otg_fs::{UsbBus, USB, UsbBusType};
-    use stm32f7xx_hal::rcc::{HSEClock, HSEClockMode};
+    use stm32f7xx_hal::rcc::{HSEClock, HSEClockMode, PLL48CLK};
     use usb_device::prelude::*;
     use usb_device::class_prelude::UsbBusAllocator;
     use usbd_serial::SerialPort;
@@ -101,35 +101,41 @@ mod app {
     use stm32f7xx_hal::qspi::{Qspi, QspiTransaction, QspiWidth};
     use cortex_m;
 
-    //use cortex_m::asm;
-    //use cortex_m_rt::entry;
-    //use panic_probe as _;
-    //use rtt_target::{rprintln, rtt_init_print};
+    // use cortex_m::asm;
+    // use cortex_m_rt::entry;
+    use panic_probe as _;
+    use rtt_target::{rprintln, rtt_init_print};
 
-
-    #[resources]
-    struct MyResources {
-        #[task_local]
-        serial: SerialPort<'static, UsbBus<USB>>,
-        #[task_local]
-        usb_cdc_device: UsbDevice<'static, UsbBus<USB>>,
+    /* resources shared across RTIC tasks */
+    #[shared]
+    struct Shared {
         spi: SoftSpi,
-        #[task_local]
-        qspi_driver: Qspi,
         header: bool,
-        byte_count:u32,
-        programmed: bool,
+        byte_count: u32,
+        programmed: bool
+    }
+
+    /* resources local to specific RTIC tasks */
+    #[local]
+    struct Local {
+        serial: SerialPort<'static, UsbBus<USB>>,
+        usb_cdc_device: UsbDevice<'static, UsbBus<USB>>,
+        qspi_driver: Qspi,
     }
 
 
-    #[init]
-    fn init(cx: init::Context) -> (init::LateResources, init::Monotonics) {
-        static mut EP_MEMORY: [u32; 1024] = [0; 1024];
+    #[init(local=[EP_MEMORY:[u32; 1024] = [0; 1024]])]
+    fn init(cx: init::Context) -> (Shared, Local, init::Monotonics) {
+        // static mut EP_MEMORY: [u32; 1024] = [0; 1024];
+        let EP_MEMORY: &'static mut [u32; 1024]  = cx.local.EP_MEMORY;
         static mut USB_BUS: Option<UsbBusAllocator<UsbBusType>> = None;
         // EP_MEM.write(&mut EP_MEMORY);
 
         let core: cortex_m::Peripherals = cx.core;
         let device: pac::Peripherals = cx.device;
+
+        rtt_init_print!(); // You may prefer to initialize another way
+        rprintln!("Hello, world!");
 
         //let mut exti :EXTI  = device.EXTI;
         // let mut syscfg = device.SYSCFG;
@@ -156,14 +162,14 @@ mod app {
         let mut wp = gpioe.pe10.into_push_pull_output();
         let mut hld = gpioe.pe15.into_push_pull_output();
 
-        let _dd2 = gpioe.pe2.into_alternate_af9()
+        let _dd2 = gpioe.pe2.into_alternate::<9>()
             .internal_pull_up(true)
             .set_speed(Speed::VeryHigh);
 
-        let _dcs = gpiob.pb6.into_alternate_af10()
+        let _dcs = gpiob.pb6.into_alternate::<10>()
             .internal_pull_up(true)
             .set_speed(Speed::VeryHigh);
-        let _dsck = gpiob.pb2.into_alternate_af9()
+        let _dsck = gpiob.pb2.into_alternate::<9>()
             .internal_pull_up(true)
             .set_speed(Speed::VeryHigh);
 
@@ -171,13 +177,13 @@ mod app {
         let reset = gpiod.pd10.into_push_pull_output();
         let mut _done = gpiod.pd14.into_floating_input();
 
-        let _dd0 = gpiod.pd11.into_alternate_af9()
+        let _dd0 = gpiod.pd11.into_alternate::<9>()
             .internal_pull_up(true)
             .set_speed(Speed::VeryHigh);
-        let _dd1 = gpiod.pd12.into_alternate_af9()
+        let _dd1 = gpiod.pd12.into_alternate::<9>()
             .internal_pull_up(true)
             .set_speed(Speed::VeryHigh);
-        let _dd3 = gpiod.pd13.into_alternate_af9()
+        let _dd3 = gpiod.pd13.into_alternate::<9>()
             .internal_pull_up(true)
             .set_speed(Speed::VeryHigh);
 
@@ -187,21 +193,20 @@ mod app {
 
         let rcc_constrain = rcc.constrain();
 
-
         // Configure clock and freeze it
         let clocks = rcc_constrain
             .cfgr
-            .hse(HSEClock::new(25.mhz(), HSEClockMode::Oscillator))
+            .hse(HSEClock::new(25_000_000.Hz(), HSEClockMode::Oscillator))
             .use_pll()
-            .use_pll48clk()
-            .sysclk(216.mhz())
+            .use_pll48clk(PLL48CLK::Pllq)
+            .sysclk(216_000_000.Hz())
             .freeze();
 
         let mut delay = Delay::new(core.SYST, clocks);
 
         // prep and reset FPGA, disable Flash chip
-        wp.set_low().ok();
-        hld.set_low().ok();
+        wp.set_low();
+        hld.set_low();
         delay.delay_ms(50_u8);
 
 
@@ -209,7 +214,7 @@ mod app {
         // Port for master clock out and usb
         let gpioa = device.GPIOA.split();
         // Master Clock out 1, alternate funtion of PA8
-        gpioa.pa8.into_alternate_af0();
+        gpioa.pa8.into_alternate::<0>();
 
         // Usb ports/pins and init
         let usb = USB::new(
@@ -217,17 +222,20 @@ mod app {
             device.OTG_FS_DEVICE,
             device.OTG_FS_PWRCLK,
             (
-                gpioa.pa11.into_alternate_af10(),
-                gpioa.pa12.into_alternate_af10(),
+                gpioa.pa11.into_alternate::<10>(),
+                gpioa.pa12.into_alternate::<10>(),
             ),
             clocks,
         );
 
-        *USB_BUS = Some(UsbBus::new(usb, &mut *EP_MEMORY));
+        unsafe {
+            // *USB_BUS = Some(UsbBus::new(usb, &mut *EP_MEMORY));
+            USB_BUS.replace(UsbBus::new(usb, &mut *EP_MEMORY));
+        }
 
-        let serial = SerialPort::new(USB_BUS.as_ref().unwrap());
+        let serial = SerialPort::new(unsafe{USB_BUS.as_ref().unwrap()});
 
-        let usb_cdc_device = UsbDeviceBuilder::new(USB_BUS.as_ref().unwrap(), UsbVidPid(0x16c0, 0x27dd))
+        let usb_cdc_device = UsbDeviceBuilder::new(unsafe{USB_BUS.as_ref().unwrap()}, UsbVidPid(0x16c0, 0x27dd))
             .manufacturer("myStorm")
             .product("IceCore")
             .serial_number("1234")
@@ -237,19 +245,16 @@ mod app {
             .self_powered(true)
             .build();
 
-        //rtt_init_print!(); // You may prefer to initialize another way
-        //rprintln!("Hello, world!");
-
         // Set status green led on
         // for _i in  1..1000000 {
-        //     status_led.set_high().ok();
+        //     status_led.set_high();
         //     delay.delay_us(1_u8);
-        //     status_led.set_low().ok();
+        //     status_led.set_low();
         //     delay.delay_us(1_u8);
         // }
-        status_led.set_low().ok();
+        status_led.set_low();
         // Set mode amber led off
-        mode_led.set_low().ok();
+        mode_led.set_low();
 
         let header: bool = true;
         let byte_count: u32 = 0;
@@ -258,17 +263,21 @@ mod app {
         let spi = SoftSpi::new(sck, mosi, ss, reset, delay);
 
         // rtic::pend(Interrupt::OTG_FS)
-
-        (init::LateResources {
-            serial,
-            usb_cdc_device,
-            spi,
-            qspi_driver,
-            header,
-            byte_count,
-            programmed,
-        },
-        init::Monotonics())
+        // lastly return the shared and local resources, as per RTIC's spec.
+        (
+            Shared {
+                spi,
+                header,
+                byte_count,
+                programmed,
+            },
+            Local {
+                serial,
+                usb_cdc_device,
+                qspi_driver,
+            },
+            init::Monotonics(),
+        )
     }
 
     #[idle]
@@ -278,10 +287,10 @@ mod app {
         }
     }
 
-    #[task(resources = [programmed, spi])]
+    #[task(shared=[programmed, spi])]
     fn manage(cx: manage::Context) {
-        let spi = cx.resources.spi;
-        let programmed = cx.resources.programmed;
+        let spi = cx.shared.spi;
+        let programmed = cx.shared.programmed;
 
         (programmed, spi).lock(|programmed: &mut bool ,spi: &mut SoftSpi| {
             if *programmed {
@@ -293,10 +302,10 @@ mod app {
         });
     }
 
-    #[task(resources = [programmed, qspi_driver])]
+    #[task(shared=[programmed], local=[qspi_driver])]
     fn dspi(cx: dspi::Context) {
-        let driver = cx.resources.qspi_driver;
-        let mut programmed = cx.resources.programmed;
+        let driver = cx.local.qspi_driver;
+        let mut programmed = cx.shared.programmed;
 
         programmed.lock(|programmed: &mut bool| {
             if *programmed {
@@ -311,21 +320,22 @@ mod app {
                         data_len: Some(1),
                     };
                     let mut buf = [count];
-                    driver.polling_write(&mut buf, transaction).unwrap();
+                    driver.write(&mut buf, transaction).unwrap();
+                    //driver.poll_status();
                 }
             }
         });
     }
 
 
-    #[task(binds = OTG_FS, resources = [serial, usb_cdc_device, spi, header, byte_count, programmed])]
+    #[task(binds = OTG_FS, shared=[spi, header, byte_count, programmed], local=[serial, usb_cdc_device])]
     fn usb_event(cx: usb_event::Context) {
-        let usb_cdc_device = cx.resources.usb_cdc_device; //: &mut UsbDevice<'static, UsbBus<USB>>
-        let serial = cx.resources.serial;//: &mut SerialPort<'static, UsbBus<USB>>
-        let spi = cx.resources.spi; //: &mut SoftSpi
-        let header = cx.resources.header;
-        let byte_count = cx.resources.byte_count;
-        let programmed = cx.resources.programmed;
+        let usb_cdc_device = cx.local.usb_cdc_device; //: &mut UsbDevice<'static, UsbBus<USB>>
+        let serial = cx.local.serial;//: &mut SerialPort<'static, UsbBus<USB>>
+        let spi = cx.shared.spi; //: &mut SoftSpi
+        let header = cx.shared.header;
+        let byte_count = cx.shared.byte_count;
+        let programmed = cx.shared.programmed;
 
         if usb_cdc_device.poll(&mut [serial]) {
             let mut buf: [u8; 512] = [0u8; 512];
