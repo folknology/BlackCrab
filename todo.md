@@ -27,8 +27,11 @@
 - [x] Change Pins and Test programming STM32
 - [x] Bring up USB and program Ice40
 - [x] Test First Tile with Proto led trail
-- [ ] Create ILD PCF
-- [ ] Create ILD Amaranth Board Definition
+- [x] Create ILD PCF
+- [x] Create ILD Amaranth Board Definition
+- [x] Create Amaranth-HDL Lab Examples 
+- [x] Move to PRobe-RS, Update RTIC and F7 HAl latest 
+- [ ] Add UART/USB-CDC support from STM32 <-> Ice40
 - [ ] Refactor the SPI to use STM32 hardware peripheral
 - [ ] Add Flash programming support for Ice40 Images
 - [ ] Move HDL examples from ArachePnr to NextPnr

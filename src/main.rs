@@ -135,7 +135,7 @@ mod app {
         let device: pac::Peripherals = cx.device;
 
         rtt_init_print!(); // You may prefer to initialize another way
-        rprintln!("Hello, world!");
+        rprintln!("Hello, over SWO/ProbeRS");
 
         //let mut exti :EXTI  = device.EXTI;
         // let mut syscfg = device.SYSCFG;
