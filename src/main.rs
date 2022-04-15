@@ -8,7 +8,8 @@ use rtic::{app};
 //use stm32f7xx_hal::gpio::gpiob::{PB3, PB4};
 //use stm32f7xx_hal::gpio::gpioc::PC13;
 use stm32f7xx_hal::gpio::gpiod::{PD10};
-use stm32f7xx_hal::delay::Delay;
+//use stm32f7xx_hal::delay::Delay;
+use stm32f7xx_hal::timer::{SysDelay};
 use stm32f7xx_hal::gpio::{PushPull, Output};
 use stm32f7xx_hal::gpio::gpioe::{PE11, PE12, PE13};
 use stm32f7xx_hal::prelude::*;
@@ -18,7 +19,7 @@ pub struct SoftSpi {
     mosi: PE13<Output<PushPull>>,
     ss: PE11<Output<PushPull>>,
     reset: PD10<Output<PushPull>>,
-    delay: Delay,
+    delay: SysDelay,
 }
 
 impl SoftSpi {
@@ -26,7 +27,7 @@ impl SoftSpi {
                mosi: PE13<Output<PushPull>>,
                ss: PE11<Output<PushPull>>,
                reset: PD10<Output<PushPull>>,
-               delay: Delay) -> SoftSpi {
+               delay: SysDelay) -> SoftSpi {
         SoftSpi { sck, mosi, ss, reset, delay }
     }
 
@@ -86,12 +87,11 @@ impl SoftSpi {
 #[app(device = stm32f7xx_hal::pac, peripherals = true, dispatchers = [LP_TIMER1])]
 mod app {
     use crate::SoftSpi;
-    use crate::Delay;
     // use crate::{PushPull, Output};
     // use stm32f7::stm32f730::{EXTI};
     use stm32f7xx_hal::{pac, prelude::*};
     use stm32f7xx_hal::otg_fs::{UsbBus, USB, UsbBusType};
-    use stm32f7xx_hal::rcc::{HSEClock, HSEClockMode, PLL48CLK};
+    use stm32f7xx_hal::rcc::{HSEClock, HSEClockMode, MCO1, PLL48CLK};
     use usb_device::prelude::*;
     use usb_device::class_prelude::UsbBusAllocator;
     use usbd_serial::SerialPort;
@@ -175,7 +175,8 @@ mod app {
 
         let gpiod = device.GPIOD.split();
         let reset = gpiod.pd10.into_push_pull_output();
-        let mut _done = gpiod.pd14.into_floating_input();
+        //let mut _done = gpiod.pd14.into_floating_input();
+        //let mut _done = gpiod.pd14.into_push_pull_output();
 
         let _dd0 = gpiod.pd11.into_alternate::<9>()
             .internal_pull_up(true)
@@ -186,6 +187,15 @@ mod app {
         let _dd3 = gpiod.pd13.into_alternate::<9>()
             .internal_pull_up(true)
             .set_speed(Speed::VeryHigh);
+
+        // let _dd0 = gpiod.pd11.into_alternate.into_push_pull_output();
+        // let _dd1 = gpiod.pd12.into_alternate.into_push_pull_output();
+        // let _dd2 = gpioe.pe2.into_push_pull_output();
+        // let _dd3 = gpiod.pd13.into_push_pull_output();
+        // _dd0.set_high();
+        // _dd1.set_low();
+        // _dd2.set_low();
+        // _dd3.set_low();
 
         //let gpioc = device.GPIOC.split();
 
@@ -200,16 +210,16 @@ mod app {
             .use_pll()
             .use_pll48clk(PLL48CLK::Pllq)
             .sysclk(216_000_000.Hz())
+            .mco1(MCO1::Hse)
             .freeze();
 
-        let mut delay = Delay::new(core.SYST, clocks);
+        //let mut delay = Delay::new(core.SYST, clocks);
+        let mut delay = core.SYST.delay(&clocks);
 
         // prep and reset FPGA, disable Flash chip
         wp.set_low();
         hld.set_low();
         delay.delay_ms(50_u8);
-
-
 
         // Port for master clock out and usb
         let gpioa = device.GPIOA.split();
@@ -225,7 +235,7 @@ mod app {
                 gpioa.pa11.into_alternate::<10>(),
                 gpioa.pa12.into_alternate::<10>(),
             ),
-            clocks,
+            &clocks,
         );
 
         unsafe {
@@ -256,11 +266,15 @@ mod app {
         // Set mode amber led off
         mode_led.set_low();
 
+        //_done.set_low();
+
         let header: bool = true;
         let byte_count: u32 = 0;
         let programmed: bool = false;
 
         let spi = SoftSpi::new(sck, mosi, ss, reset, delay);
+
+        rprintln!("Init finishing");
 
         // rtic::pend(Interrupt::OTG_FS)
         // lastly return the shared and local resources, as per RTIC's spec.
@@ -309,7 +323,8 @@ mod app {
 
         programmed.lock(|programmed: &mut bool| {
             if *programmed {
-                for count in 0..16 {
+                let count : u8 = 255;
+                for _count  in 0..count {
                     let transaction = QspiTransaction {
                         iwidth: QspiWidth::NONE,
                         awidth: QspiWidth::NONE,
@@ -319,8 +334,12 @@ mod app {
                         dummy: 0,
                         data_len: Some(1),
                     };
-                    let mut buf = [count];
-                    driver.write(&mut buf, transaction).unwrap();
+                    //rprintln!("count:{}",_count as u8);
+                    //let mut buf = [_count as u8];
+                    driver.write(&[_count], transaction).unwrap();
+                    for _ in 0..100_000 {
+                        cortex_m::asm::nop();
+                    }
                     //driver.poll_status();
                 }
             }
@@ -370,7 +389,7 @@ mod app {
                             *programmed = true;
                             // Maybe add a delay here before sending anything to HDL
                             //manage::spawn().unwrap();
-                            //dspi::spawn().unwrap();
+                            dspi::spawn().unwrap();
                         }
                     });
                 }
