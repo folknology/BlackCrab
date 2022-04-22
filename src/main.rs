@@ -7,10 +7,10 @@
 use rtic::{app};
 //use stm32f7xx_hal::gpio::gpiob::{PB3, PB4};
 //use stm32f7xx_hal::gpio::gpioc::PC13;
-use stm32f7xx_hal::gpio::gpiod::{PD10};
+// use stm32f7xx_hal::gpio::gpiod::{PD10};
 //use stm32f7xx_hal::delay::Delay;
 use stm32f7xx_hal::timer::{SysDelay};
-use stm32f7xx_hal::gpio::{PushPull, Output};
+use stm32f7xx_hal::gpio::{PushPull, Output, PB4};
 use stm32f7xx_hal::gpio::gpioe::{PE11, PE12, PE13};
 use stm32f7xx_hal::prelude::*;
 
@@ -18,7 +18,7 @@ pub struct SoftSpi {
     sck: PE12<Output<PushPull>>,
     mosi: PE13<Output<PushPull>>,
     ss: PE11<Output<PushPull>>,
-    reset: PD10<Output<PushPull>>,
+    reset: PB4<Output<PushPull>>,
     delay: SysDelay,
 }
 
@@ -26,7 +26,7 @@ impl SoftSpi {
     pub fn new(sck: PE12<Output<PushPull>>,
                mosi: PE13<Output<PushPull>>,
                ss: PE11<Output<PushPull>>,
-               reset: PD10<Output<PushPull>>,
+               reset: PB4<Output<PushPull>>,
                delay: SysDelay) -> SoftSpi {
         SoftSpi { sck, mosi, ss, reset, delay }
     }
@@ -145,22 +145,25 @@ mod app {
 
         // Grab the GPIOB Port and the mode/status leds on pins PB12/13
         let gpiob = device.GPIOB.split();
-        let mut mode_led = gpiob.pb7.into_push_pull_output();
-        let mut status_led = gpiob.pb5.into_push_pull_output();
-        // let mut mode_button = gpiob.pb4.into_floating_input();
+        let reset = gpiob.pb4.into_push_pull_output();
+        //PB12-15:SS,SCK,SO,SI
+        let mut _fss = gpiob.pb12.into_push_pull_output();
+        let mut _fck = gpiob.pb13.into_push_pull_output();
+        let mut _fso = gpiob.pb14.into_floating_input(); //Miso
+        let mut _fsi = gpiob.pb15.into_push_pull_output(); // Mosi
+
+        let gpioe = device.GPIOE.split();
+        // let mut mode_button = gpioe.pe13.into_floating_input();
         //
         // mode_button.make_interrupt_source(&mut syscfg, &mut rcc);
         // mode_button.trigger_on_edge(&mut exti, Edge::Rising);
         // mode_button.enable_interrupt(&mut exti);
-
-        let gpioe = device.GPIOE.split();
         let sck = gpioe.pe12.into_push_pull_output();
         // let miso = gpiob.pb4.into_floating_input();
         // TODO I think mosi should actually be the miso PB4 here
         let mosi = gpioe.pe13.into_push_pull_output();
         let ss = gpioe.pe11.into_push_pull_output();
-        let mut wp = gpioe.pe10.into_push_pull_output();
-        let mut hld = gpioe.pe15.into_push_pull_output();
+        let mut mode_led = gpioe.pe5.into_push_pull_output();
 
         let _dd2 = gpioe.pe2.into_alternate::<9>()
             .internal_pull_up(true)
@@ -174,9 +177,8 @@ mod app {
             .set_speed(Speed::VeryHigh);
 
         let gpiod = device.GPIOD.split();
-        let reset = gpiod.pd10.into_push_pull_output();
-        //let mut _done = gpiod.pd14.into_floating_input();
-        //let mut _done = gpiod.pd14.into_push_pull_output();
+        //Make int a pullup?
+        let mut _int = gpiod.pd3.into_floating_input();
 
         let _dd0 = gpiod.pd11.into_alternate::<9>()
             .internal_pull_up(true)
@@ -197,7 +199,8 @@ mod app {
         // _dd2.set_low();
         // _dd3.set_low();
 
-        //let gpioc = device.GPIOC.split();
+        let gpioc = device.GPIOC.split();
+        let mut _done = gpioc.pc13.into_floating_input();
 
         let qspi_driver = Qspi::new(&mut rcc, device.QUADSPI, 1, 1);
 
@@ -216,9 +219,7 @@ mod app {
         //let mut delay = Delay::new(core.SYST, clocks);
         let mut delay = core.SYST.delay(&clocks);
 
-        // prep and reset FPGA, disable Flash chip
-        wp.set_low();
-        hld.set_low();
+        // prep and reset FPGA
         delay.delay_ms(50_u8);
 
         // Port for master clock out and usb
@@ -255,15 +256,14 @@ mod app {
             .self_powered(true)
             .build();
 
-        // Set status green led on
-        // for _i in  1..1000000 {
-        //     status_led.set_high();
-        //     delay.delay_us(1_u8);
-        //     status_led.set_low();
-        //     delay.delay_us(1_u8);
-        // }
-        status_led.set_low();
-        // Set mode amber led off
+        //Set mode green led on
+        for _i in  1..1000000 {
+            mode_led.set_high();
+            delay.delay_us(1_u8);
+            mode_led.set_low();
+            delay.delay_us(1_u8);
+        }
+        // Set mode amber red led on with power green
         mode_led.set_low();
 
         //_done.set_low();

@@ -32,16 +32,16 @@
 - [x] Create Amaranth-HDL Lab Examples 
 - [x] Move to PRobe-RS, Update RTIC and F7 HAl latest 
 ## Port BlackCrab to new ILB/BINxt
-- [ ] Change Reset pin from PD10 to PB4
+- [x] Change Reset pin from PD10 to PB4X
 - [ ] Try new Ice SPI PRog pins from QSPI as bit bang QCK:PB2, QD0:PD11, QSS:PD6
 - [ ] Port IceProgramming to QSPI peripheral
-- [ ] Change Done pin input to PC13
-- [ ] Change Mode pin PE5
-- [ ] Mode Button is now boot/dfu button moved to pin PE3
-- [ ] Added new  interrupt on PD3 
-- [ ] Remove Status led, now redundant
-- [ ] Remove WP and HLD pins as now redundant
-- [ ] Add new SPI pins for STM Flash PB12-15:SS,SCK,SO,SI
+- [x] Change Done pin input to PC13
+- [x] Change Mode pin PE5
+- [x] Mode Button is now boot/dfu button moved to pin PE3
+- [x] Added new  interrupt on PD3 
+- [x] Remove Status led, now redundant
+- [x] Remove WP and HLD pins as now redundant
+- [x] Add new SPI pins for STM Flash PB12-15:SS,SCK,SO,SI
 - [ ] Add UART/USB-CDC support from STM32 <-> Ice40
 - [ ] Add Flash programming support for Ice40 Images
 - [ ] Move HDL examples from ArachePnr to NextPnr
