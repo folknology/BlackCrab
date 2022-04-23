@@ -257,12 +257,12 @@ mod app {
             .build();
 
         //Set mode green led on
-        for _i in  1..1000000 {
-            mode_led.set_high();
-            delay.delay_us(1_u8);
-            mode_led.set_low();
-            delay.delay_us(1_u8);
-        }
+        // for _i in  1..1000000 {
+        //     mode_led.set_high();
+        //     delay.delay_us(1_u8);
+        //     mode_led.set_low();
+        //     delay.delay_us(1_u8);
+        // }
         // Set mode amber red led on with power green
         mode_led.set_low();
 
