@@ -263,6 +263,7 @@ mod app {
         //     mode_led.set_low();
         //     delay.delay_us(1_u8);
         // }
+
         // Set mode amber red led on with power green
         mode_led.set_low();
 
