@@ -73,11 +73,36 @@ impl Fpga {
         self.bus.write(&[byte], transaction).unwrap();
     }
 
+    pub fn test_qspi(&mut self) {
+        let count : u8 = 255;
+        for _count  in 0..count {
+            let transaction = QspiTransaction {
+                iwidth: QspiWidth::NONE,
+                awidth: QspiWidth::NONE,
+                dwidth: QspiWidth::QUAD,//DUAL
+                instruction: 0,
+                address: None,
+                dummy: 0,
+                data_len: Some(1),
+            };
+            //rprintln!("count:{}",_count as u8);
+            //let mut buf = [_count as u8];
+            self.ss.set_low();
+            self.bus.write(&[_count], transaction).unwrap();
+            self.ss.set_high();
+            for _ in 0..100_000 {
+                cortex_m::asm::nop();
+            }
+        }
+    }
+
     fn transfer(&mut self, byte: u8) {
         self.select();
         self.send(byte);
         self.deselect();
     }
+
+
 }
 
 #[app(device = stm32f7xx_hal::pac, peripherals = true, dispatchers = [LP_TIMER1])]
@@ -364,6 +389,8 @@ mod app {
                             ice.deselect();
                             *programmed = true;
                             // Maybe add a delay here before sending anything to HDL
+                            ice.delay_ms(100_u8);
+                            ice.test_qspi();
                             //manage::spawn().unwrap();
                             //dspi::spawn().unwrap();
                         }
