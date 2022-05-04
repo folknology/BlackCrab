@@ -7,28 +7,29 @@
 use rtic::{app};
 //use stm32f7xx_hal::gpio::gpiob::{PB3, PB4};
 //use stm32f7xx_hal::gpio::gpioc::PC13;
-// use stm32f7xx_hal::gpio::gpiod::{PD10};
+//use stm32f7xx_hal::gpio::gpiod::{PD11};
 //use stm32f7xx_hal::delay::Delay;
 use stm32f7xx_hal::timer::{SysDelay};
-use stm32f7xx_hal::gpio::{PushPull, Output, PB4};
-use stm32f7xx_hal::gpio::gpioe::{PE11, PE12, PE13};
+use stm32f7xx_hal::gpio::{PushPull, Output, PB6, PB4};
+//use stm32f7xx_hal::gpio::gpioe::{PE11, PE12, PE13};
 use stm32f7xx_hal::prelude::*;
+use stm32f7xx_hal::qspi::{Qspi, QspiTransaction, QspiWidth};
+// use stm32f7xx_hal::gpio::{Speed};
 
-pub struct SoftSpi {
-    sck: PE12<Output<PushPull>>,
-    mosi: PE13<Output<PushPull>>,
-    ss: PE11<Output<PushPull>>,
+pub struct Fpga {
+    ss: PB6<Output<PushPull>>,
     reset: PB4<Output<PushPull>>,
     delay: SysDelay,
+    bus: Qspi
 }
 
-impl SoftSpi {
-    pub fn new(sck: PE12<Output<PushPull>>,
-               mosi: PE13<Output<PushPull>>,
-               ss: PE11<Output<PushPull>>,
+impl Fpga {
+    pub fn new(
+               ss: PB6<Output<PushPull>>,
                reset: PB4<Output<PushPull>>,
-               delay: SysDelay) -> SoftSpi {
-        SoftSpi { sck, mosi, ss, reset, delay }
+               delay: SysDelay,
+               bus : Qspi) -> Fpga {
+        Fpga { ss, reset, delay, bus}
     }
 
     pub fn reset(&mut self) {
@@ -41,16 +42,16 @@ impl SoftSpi {
         self.ss.set_high();
         self.delay.delay_ms(50_u8);
 
-        self.mosi.set_low();
-        self.sck.set_low();
-        self.ss.set_low();
-        for _ in 0..8 {
-            self.delay.delay_us(10_u8);
-            self.sck.set_high();
-            self.delay.delay_us(10_u8);
-            self.sck.set_low();
-        }
-        self.ss.set_high();
+        let transaction = QspiTransaction {
+                        iwidth: QspiWidth::NONE,
+                        awidth: QspiWidth::NONE,
+                        dwidth: QspiWidth::SING,
+                        instruction: 0,
+                        address: None,
+                        dummy: 0,
+                        data_len: Some(8),
+                    };
+        self.bus.write(&[0,0,0,0,0,0,0,0], transaction).unwrap();
     }
 
     pub fn select(&mut self) { self.ss.set_low(); }
@@ -60,21 +61,16 @@ impl SoftSpi {
     fn delay_ms(&mut self, ms: u8) { self.delay.delay_ms(ms); }
 
     pub fn send(&mut self, byte: u8) {
-        // self.ss.set_low();
-        for bit_offset in 0..8 {
-            self.sck.set_low();
-            let out_bit = (byte >> (7 - bit_offset)) & 0b1;
-            if out_bit == 1 {
-                self.mosi.set_high();
-            } else {
-                self.mosi.set_low();
-            }
-            self.delay.delay_us(1_u8);
-            self.sck.set_high();
-            self.delay.delay_us(1_u8);
-        }
-        self.sck.set_low();
-        // self.ss.set_high();
+        let transaction = QspiTransaction {
+                        iwidth: QspiWidth::NONE,
+                        awidth: QspiWidth::NONE,
+                        dwidth: QspiWidth::SING,
+                        instruction: 0,
+                        address: None,
+                        dummy: 0,
+                        data_len: Some(1),
+                    };
+        self.bus.write(&[byte], transaction).unwrap();
     }
 
     fn transfer(&mut self, byte: u8) {
@@ -86,7 +82,7 @@ impl SoftSpi {
 
 #[app(device = stm32f7xx_hal::pac, peripherals = true, dispatchers = [LP_TIMER1])]
 mod app {
-    use crate::SoftSpi;
+    use crate::Fpga;
     // use crate::{PushPull, Output};
     // use stm32f7::stm32f730::{EXTI};
     use stm32f7xx_hal::{pac, prelude::*};
@@ -97,8 +93,8 @@ mod app {
     use usbd_serial::SerialPort;
     // use stm32f7xx_hal::gpio::{ExtiPin, Edge, Speed};
     use stm32f7xx_hal::gpio::{Speed};
+    use stm32f7xx_hal::qspi::{Qspi};
     use stm32f7xx_hal::rcc::RccExt;
-    use stm32f7xx_hal::qspi::{Qspi, QspiTransaction, QspiWidth};
     use cortex_m;
 
     // use cortex_m::asm;
@@ -109,7 +105,7 @@ mod app {
     /* resources shared across RTIC tasks */
     #[shared]
     struct Shared {
-        spi: SoftSpi,
+        ice: Fpga,
         header: bool,
         byte_count: u32,
         programmed: bool
@@ -119,8 +115,7 @@ mod app {
     #[local]
     struct Local {
         serial: SerialPort<'static, UsbBus<USB>>,
-        usb_cdc_device: UsbDevice<'static, UsbBus<USB>>,
-        qspi_driver: Qspi,
+        usb_cdc_device: UsbDevice<'static, UsbBus<USB>>
     }
 
 
@@ -142,6 +137,7 @@ mod app {
 
         // Constrain clocking registers
         let mut rcc = device.RCC;
+        //let rcc = device.RCC;
 
         // Grab the GPIOB Port and the mode/status leds on pins PB12/13
         let gpiob = device.GPIOB.split();
@@ -152,27 +148,23 @@ mod app {
         let mut _fso = gpiob.pb14.into_floating_input(); //Miso
         let mut _fsi = gpiob.pb15.into_push_pull_output(); // Mosi
 
+        let _qsck = gpiob.pb2.into_alternate::<9>()
+            .internal_pull_up(true)
+            .set_speed(Speed::VeryHigh);
+        let ss = gpiob.pb6.into_push_pull_output();
+            // .internal_pull_up(true)
+            // .set_speed(Speed::VeryHigh);
+
         let gpioe = device.GPIOE.split();
         // let mut mode_button = gpioe.pe13.into_floating_input();
         //
         // mode_button.make_interrupt_source(&mut syscfg, &mut rcc);
         // mode_button.trigger_on_edge(&mut exti, Edge::Rising);
         // mode_button.enable_interrupt(&mut exti);
-        let sck = gpioe.pe12.into_push_pull_output();
-        // let miso = gpiob.pb4.into_floating_input();
-        // TODO I think mosi should actually be the miso PB4 here
-        let mosi = gpioe.pe13.into_push_pull_output();
-        let ss = gpioe.pe11.into_push_pull_output();
+
         let mut mode_led = gpioe.pe5.into_push_pull_output();
 
-        let _dd2 = gpioe.pe2.into_alternate::<9>()
-            .internal_pull_up(true)
-            .set_speed(Speed::VeryHigh);
-
-        let _dcs = gpiob.pb6.into_alternate::<10>()
-            .internal_pull_up(true)
-            .set_speed(Speed::VeryHigh);
-        let _dsck = gpiob.pb2.into_alternate::<9>()
+        let _q2 = gpioe.pe2.into_alternate::<9>()
             .internal_pull_up(true)
             .set_speed(Speed::VeryHigh);
 
@@ -180,29 +172,21 @@ mod app {
         //Make int a pullup?
         let mut _int = gpiod.pd3.into_floating_input();
 
-        let _dd0 = gpiod.pd11.into_alternate::<9>()
+        //let mosi = gpiod.pd11.into_push_pull_output();
+        let _q0 = gpiod.pd11.into_alternate::<9>()
             .internal_pull_up(true)
             .set_speed(Speed::VeryHigh);
-        let _dd1 = gpiod.pd12.into_alternate::<9>()
+        let _q1 = gpiod.pd12.into_alternate::<9>()
             .internal_pull_up(true)
             .set_speed(Speed::VeryHigh);
-        let _dd3 = gpiod.pd13.into_alternate::<9>()
+        let _q3 = gpiod.pd13.into_alternate::<9>()
             .internal_pull_up(true)
             .set_speed(Speed::VeryHigh);
-
-        // let _dd0 = gpiod.pd11.into_alternate.into_push_pull_output();
-        // let _dd1 = gpiod.pd12.into_alternate.into_push_pull_output();
-        // let _dd2 = gpioe.pe2.into_push_pull_output();
-        // let _dd3 = gpiod.pd13.into_push_pull_output();
-        // _dd0.set_high();
-        // _dd1.set_low();
-        // _dd2.set_low();
-        // _dd3.set_low();
 
         let gpioc = device.GPIOC.split();
         let mut _done = gpioc.pc13.into_floating_input();
 
-        let qspi_driver = Qspi::new(&mut rcc, device.QUADSPI, 1, 1);
+        let bus = Qspi::new(&mut rcc, device.QUADSPI, 1, 1);
 
         let rcc_constrain = rcc.constrain();
 
@@ -256,14 +240,6 @@ mod app {
             .self_powered(true)
             .build();
 
-        //Set mode green led on
-        // for _i in  1..1000000 {
-        //     mode_led.set_high();
-        //     delay.delay_us(1_u8);
-        //     mode_led.set_low();
-        //     delay.delay_us(1_u8);
-        // }
-
         // Set mode amber red led on with power green
         mode_led.set_low();
 
@@ -273,7 +249,7 @@ mod app {
         let byte_count: u32 = 0;
         let programmed: bool = false;
 
-        let spi = SoftSpi::new(sck, mosi, ss, reset, delay);
+        let ice = Fpga::new(ss, reset, delay, bus);
 
         rprintln!("Init finishing");
 
@@ -281,7 +257,7 @@ mod app {
         // lastly return the shared and local resources, as per RTIC's spec.
         (
             Shared {
-                spi,
+                ice,
                 header,
                 byte_count,
                 programmed,
@@ -289,7 +265,6 @@ mod app {
             Local {
                 serial,
                 usb_cdc_device,
-                qspi_driver,
             },
             init::Monotonics(),
         )
@@ -302,57 +277,57 @@ mod app {
         }
     }
 
-    #[task(shared=[programmed, spi])]
+    #[task(shared=[programmed, ice])]
     fn manage(cx: manage::Context) {
-        let spi = cx.shared.spi;
+        let ice = cx.shared.ice;
         let programmed = cx.shared.programmed;
 
-        (programmed, spi).lock(|programmed: &mut bool ,spi: &mut SoftSpi| {
+        (programmed, ice).lock(|programmed: &mut bool, ice: &mut Fpga| {
             if *programmed {
                 for count in 0..16 {
-                    spi.delay_ms(100);
-                    spi.transfer(count as u8);
+                    ice.delay_ms(100);
+                    ice.transfer(count as u8);
                 }
             }
         });
     }
 
-    #[task(shared=[programmed], local=[qspi_driver])]
-    fn dspi(cx: dspi::Context) {
-        let driver = cx.local.qspi_driver;
-        let mut programmed = cx.shared.programmed;
+    // #[task(shared=[programmed], local=[qspi_driver])]
+    // fn dspi(cx: dspi::Context) {
+    //     let driver = cx.local.qspi_driver;
+    //     let mut programmed = cx.shared.programmed;
+    //
+    //     programmed.lock(|programmed: &mut bool| {
+    //         if *programmed {
+    //             let count : u8 = 255;
+    //             for _count  in 0..count {
+    //                 let transaction = QspiTransaction {
+    //                     iwidth: QspiWidth::NONE,
+    //                     awidth: QspiWidth::NONE,
+    //                     dwidth: QspiWidth::QUAD,//DUAL
+    //                     instruction: 0,
+    //                     address: None,
+    //                     dummy: 0,
+    //                     data_len: Some(1),
+    //                 };
+    //                 //rprintln!("count:{}",_count as u8);
+    //                 //let mut buf = [_count as u8];
+    //                 driver.write(&[_count], transaction).unwrap();
+    //                 for _ in 0..100_000 {
+    //                     cortex_m::asm::nop();
+    //                 }
+    //                 //driver.poll_status();
+    //             }
+    //         }
+    //     });
+    // }
 
-        programmed.lock(|programmed: &mut bool| {
-            if *programmed {
-                let count : u8 = 255;
-                for _count  in 0..count {
-                    let transaction = QspiTransaction {
-                        iwidth: QspiWidth::NONE,
-                        awidth: QspiWidth::NONE,
-                        dwidth: QspiWidth::QUAD,//DUAL
-                        instruction: 0,
-                        address: None,
-                        dummy: 0,
-                        data_len: Some(1),
-                    };
-                    //rprintln!("count:{}",_count as u8);
-                    //let mut buf = [_count as u8];
-                    driver.write(&[_count], transaction).unwrap();
-                    for _ in 0..100_000 {
-                        cortex_m::asm::nop();
-                    }
-                    //driver.poll_status();
-                }
-            }
-        });
-    }
 
-
-    #[task(binds = OTG_FS, shared=[spi, header, byte_count, programmed], local=[serial, usb_cdc_device])]
+    #[task(binds = OTG_FS, shared=[ice, header, byte_count, programmed], local=[serial, usb_cdc_device])]
     fn usb_event(cx: usb_event::Context) {
         let usb_cdc_device = cx.local.usb_cdc_device; //: &mut UsbDevice<'static, UsbBus<USB>>
         let serial = cx.local.serial;//: &mut SerialPort<'static, UsbBus<USB>>
-        let spi = cx.shared.spi; //: &mut SoftSpi
+        let ice = cx.shared.ice; //: &mut SoftSpi
         let header = cx.shared.header;
         let byte_count = cx.shared.byte_count;
         let programmed = cx.shared.programmed;
@@ -362,35 +337,35 @@ mod app {
 
             match serial.read(&mut buf) {
                 Ok(count) if count > 0 => {
-                    (header, byte_count, programmed, spi).lock(|header, byte_count, programmed, spi: &mut SoftSpi| {
+                    (header, byte_count, programmed, ice).lock(|header, byte_count, programmed, ice: &mut Fpga| {
                         * byte_count += count as u32;
                         for c in buf[0..count].iter_mut() {
                             if *header {
                                 if *c == 0x7E as u8 {
                                     *programmed = false;
-                                    spi.reset();
-                                    spi.select();
+                                    ice.reset();
+                                    ice.select();
                                     *header = false;
-                                    spi.send(*c);
+                                    ice.send(*c);
                                 } else {
                                     continue
                                 }
                             } else {
-                                spi.send(*c);
+                                ice.send(*c);
                             }
                         }
                         if *byte_count >= 135100 as u32 {
                             *header = true;
                             *byte_count = 0;
-                            spi.delay_ms(10_u8);
+                            ice.delay_ms(10_u8);
                             for _ in 0..7 {
-                                spi.send(0x00 as u8);
+                                ice.send(0x00 as u8);
                             }
-                            spi.deselect();
+                            ice.deselect();
                             *programmed = true;
                             // Maybe add a delay here before sending anything to HDL
                             //manage::spawn().unwrap();
-                            dspi::spawn().unwrap();
+                            //dspi::spawn().unwrap();
                         }
                     });
                 }
