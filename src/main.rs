@@ -10,13 +10,69 @@ use rtic::{app};
 //use stm32f7xx_hal::gpio::gpiod::{PD11};
 //use stm32f7xx_hal::delay::Delay;
 use stm32f7xx_hal::timer::{SysDelay};
-use stm32f7xx_hal::gpio::{PushPull, Output, PB6, PB4};
+use stm32f7xx_hal::gpio::{Alternate, Pin,PushPull, Output, PB6, PB4, PB12};
 //use stm32f7xx_hal::gpio::gpioe::{PE11, PE12, PE13};
 use stm32f7xx_hal::prelude::*;
 use stm32f7xx_hal::qspi::{Qspi, QspiTransaction, QspiWidth};
+use stm32f7xx_hal::spi::{Spi, Enabled};
+use stm32f7xx_hal::pac::SPI2;
 // use stm32f7xx_hal::gpio::{Speed};
 
+pub type Hspi = Spi<SPI2, (
+    Pin<'B',13,Alternate<5,PushPull>>,
+    Pin<'B',14,Alternate<5,PushPull>>,
+    Pin<'B',15,Alternate<5,PushPull>>),
+    Enabled<u8>>;
+
+pub struct Flash {
+    ss: PB12<Output<PushPull>>,
+    spi: Hspi,
+}
+impl Flash {
+    pub fn new(ss:PB12<Output<PushPull>>, spi:Hspi) -> Flash { Flash { ss, spi } }
+
+    pub fn id(&mut self) -> u32 {
+        let mut idc:[u8;4] = [0x00, 0x00, 0x00, 0x00];
+        idc[0] = 0xAB;
+        self.ss.set_low();
+        self.spi.transfer(&mut idc).unwrap();
+        self.ss.set_high();
+        idc[0] = 0x9F;
+        self.ss.set_low();
+        self.spi.transfer(&mut idc).unwrap();
+        self.ss.set_high();
+        return u32::from(idc[1]) << 16 | u32::from(idc[2]) << 8 | u32::from(idc[3]);
+    }
+
+    pub fn transfer(&mut self, data: &mut[u8;4]) {
+        self.ss.set_low();
+        self.spi.transfer(&mut data.as_mut_slice()).unwrap();
+        self.ss.set_high();
+    }
+
+    pub fn write(&mut self, data: &mut[u8;4]) {
+        // ToDo
+        // Erase mem first
+        self.ss.set_low();
+        self.spi.write(&mut data.as_mut_slice()).unwrap();
+        self.ss.set_high();
+    }
+
+    pub fn read(&mut self, data: &mut[u8;4]) {
+        // ToDo
+        self.ss.set_low();
+        self.spi.transfer(&mut data.as_mut_slice()).unwrap();
+        self.ss.set_high();
+    }
+}
+enum FPGAState {
+    Prelude,
+    Body
+}
+
 pub struct Fpga {
+    bytes: u32,
+    state: FPGAState,
     ss: PB6<Output<PushPull>>,
     reset: PB4<Output<PushPull>>,
     delay: SysDelay,
@@ -29,7 +85,48 @@ impl Fpga {
                reset: PB4<Output<PushPull>>,
                delay: SysDelay,
                bus : Qspi) -> Fpga {
-        Fpga { ss, reset, delay, bus}
+        Fpga {
+            bytes:0,
+            state:FPGAState::Prelude,
+            ss,
+            reset,
+            delay,
+            bus
+        }
+    }
+
+    pub fn prog(&mut self, buf: &mut[u8; 512], count: usize) -> bool {
+        for c in buf[0..count].iter_mut() {
+            self.bytes += 1;
+            match self.state {
+                FPGAState::Prelude => {
+                    if *c == 0x7E as u8 {
+                        self.reset();
+                        self.select();
+                        self.send(*c);
+                        self.state = FPGAState::Body;
+                    } else {
+                        //rprintln!("Prelude Byte {:02x}", * c);
+                        continue
+                    }
+                }
+                FPGAState::Body => {
+                    self.send(*c);
+                }
+            }
+        }
+        return if self.bytes >= 135100 as u32 {
+            self.delay_ms(10_u8);
+            for _ in 0..7 {
+                self.send(0x00 as u8);
+            }
+            self.deselect();
+            self.bytes = 0;
+            self.state = FPGAState::Prelude;
+            true
+        } else {
+            false
+        }
     }
 
     pub fn reset(&mut self) {
@@ -108,6 +205,7 @@ impl Fpga {
 #[app(device = stm32f7xx_hal::pac, peripherals = true, dispatchers = [LP_TIMER1])]
 mod app {
     use crate::Fpga;
+    use crate::Flash;
     // use crate::{PushPull, Output};
     // use stm32f7::stm32f730::{EXTI};
     use stm32f7xx_hal::{pac, prelude::*};
@@ -121,16 +219,19 @@ mod app {
     use stm32f7xx_hal::qspi::{Qspi};
     use stm32f7xx_hal::rcc::RccExt;
     use cortex_m;
+    use embedded_hal::spi::{Mode, Phase, Polarity};
 
     // use cortex_m::asm;
     // use cortex_m_rt::entry;
     use panic_probe as _;
     use rtt_target::{rprintln, rtt_init_print};
+    use stm32f7xx_hal::spi::Spi;
 
     /* resources shared across RTIC tasks */
     #[shared]
     struct Shared {
         ice: Fpga,
+        flash: Flash,
         header: bool,
         byte_count: u32,
         programmed: bool
@@ -139,6 +240,7 @@ mod app {
     /* resources local to specific RTIC tasks */
     #[local]
     struct Local {
+        command: u8,
         serial: SerialPort<'static, UsbBus<USB>>,
         usb_cdc_device: UsbDevice<'static, UsbBus<USB>>
     }
@@ -168,10 +270,10 @@ mod app {
         let gpiob = device.GPIOB.split();
         let reset = gpiob.pb4.into_push_pull_output();
         //PB12-15:SS,SCK,SO,SI
-        let mut _fss = gpiob.pb12.into_push_pull_output();
-        let mut _fck = gpiob.pb13.into_push_pull_output();
-        let mut _fso = gpiob.pb14.into_floating_input(); //Miso
-        let mut _fsi = gpiob.pb15.into_push_pull_output(); // Mosi
+        let fss = gpiob.pb12.into_push_pull_output();
+        let fck = gpiob.pb13.into_alternate::<5>();
+        let fso = gpiob.pb14.into_alternate::<5>(); //Miso
+        let fsi = gpiob.pb15.into_alternate::<5>(); // Mosi
 
         let _qsck = gpiob.pb2.into_alternate::<9>()
             .internal_pull_up(true)
@@ -213,7 +315,7 @@ mod app {
 
         let bus = Qspi::new(&mut rcc, device.QUADSPI, 1, 1);
 
-        let rcc_constrain = rcc.constrain();
+        let mut rcc_constrain = rcc.constrain();
 
         // Configure clock and freeze it
         let clocks = rcc_constrain
@@ -225,6 +327,14 @@ mod app {
             .mco1(MCO1::Hse)
             .freeze();
 
+        let spi = Spi::new(device.SPI2,(fck, fso, fsi))
+            .enable(
+                Mode{polarity: Polarity::IdleLow, phase: Phase::CaptureOnFirstTransition},
+                1_000_000.Hz(),
+                &clocks,
+                &mut rcc_constrain.apb1
+            );
+        let mut flash = Flash{ ss: fss, spi };
         //let mut delay = Delay::new(core.SYST, clocks);
         let mut delay = core.SYST.delay(&clocks);
 
@@ -273,9 +383,10 @@ mod app {
         let header: bool = true;
         let byte_count: u32 = 0;
         let programmed: bool = false;
+        let command = 0xff;
 
         let ice = Fpga::new(ss, reset, delay, bus);
-
+        rprintln!("Flash Id {:08x}", flash.id());
         rprintln!("Init finishing");
 
         // rtic::pend(Interrupt::OTG_FS)
@@ -283,11 +394,13 @@ mod app {
         (
             Shared {
                 ice,
+                flash,
                 header,
                 byte_count,
                 programmed,
             },
             Local {
+                command,
                 serial,
                 usb_cdc_device,
             },
@@ -348,51 +461,61 @@ mod app {
     // }
 
 
-    #[task(binds = OTG_FS, shared=[ice, header, byte_count, programmed], local=[serial, usb_cdc_device])]
+    #[task(binds = OTG_FS, shared=[ice, flash, header, byte_count, programmed], local=[command, serial, usb_cdc_device])]
     fn usb_event(cx: usb_event::Context) {
         let usb_cdc_device = cx.local.usb_cdc_device; //: &mut UsbDevice<'static, UsbBus<USB>>
         let serial = cx.local.serial;//: &mut SerialPort<'static, UsbBus<USB>>
-        let ice = cx.shared.ice; //: &mut SoftSpi
-        let header = cx.shared.header;
-        let byte_count = cx.shared.byte_count;
-        let programmed = cx.shared.programmed;
+        let ice = cx.shared.ice; //: &mut FPGA
+        let _command = cx.local.command; // u8
+        let programmed = cx.shared.programmed; //bool
+        // let header = cx.shared.header;
+        // let byte_count = cx.shared.byte_count;
+
+
 
         if usb_cdc_device.poll(&mut [serial]) {
             let mut buf: [u8; 512] = [0u8; 512];
 
             match serial.read(&mut buf) {
                 Ok(count) if count > 0 => {
-                    (header, byte_count, programmed, ice).lock(|header, byte_count, programmed, ice: &mut Fpga| {
-                        * byte_count += count as u32;
-                        for c in buf[0..count].iter_mut() {
-                            if *header {
-                                if *c == 0x7E as u8 {
-                                    *programmed = false;
-                                    ice.reset();
-                                    ice.select();
-                                    *header = false;
-                                    ice.send(*c);
-                                } else {
-                                    continue
-                                }
-                            } else {
-                                ice.send(*c);
-                            }
-                        }
-                        if *byte_count >= 135100 as u32 {
-                            *header = true;
-                            *byte_count = 0;
-                            ice.delay_ms(10_u8);
-                            for _ in 0..7 {
-                                ice.send(0x00 as u8);
-                            }
-                            ice.deselect();
-                            *programmed = true;
-                            // Maybe add a delay here before sending anything to HDL
+                    (programmed, ice).lock(|programmed, ice: &mut Fpga| {
+                    // (header, byte_count, programmed, ice).lock(|header, byte_count, programmed, ice: &mut Fpga| {
+                    //     * byte_count += count as u32;
+                    //     for c in buf[0..count].iter_mut() {
+                    //         if *header {
+                    //             if *c == 0x7E as u8 {
+                    //                 *programmed = false;
+                    //                 ice.reset();
+                    //                 ice.select();
+                    //                 *header = false;
+                    //                 ice.send(*c);
+                    //             } else {
+                    //                 rprintln!("Header Byte {:02x}", *c);
+                    //                 continue
+                    //             }
+                    //         } else {
+                    //             ice.send(*c);
+                    //         }
+                    //     }
+                    //     if *byte_count >= 135100 as u32 {
+                    //         *header = true;
+                    //         *byte_count = 0;
+                    //         ice.delay_ms(10_u8);
+                    //         for _ in 0..7 {
+                    //             ice.send(0x00 as u8);
+                    //         }
+                    //         ice.deselect();
+                    //         *programmed = true;
+                    //         // Maybe add a delay here before sending anything to HDL
+                    //         ice.delay_ms(100_u8);
+                    //         ice.test_qspi();
+                    //         //manage::spawn().unwrap();
+                    //         //dspi::spawn().unwrap();
+                    //     }
+                        *programmed = ice.prog(&mut buf, count);
+                        if *programmed {
                             ice.delay_ms(100_u8);
                             ice.test_qspi();
-                            //manage::spawn().unwrap();
-                            //dspi::spawn().unwrap();
                         }
                     });
                 }
