@@ -67,7 +67,8 @@ impl Flash {
 }
 enum FPGAState {
     Prelude,
-    Body
+    Body,
+    Post
 }
 
 pub struct Fpga {
@@ -112,10 +113,16 @@ impl Fpga {
                 }
                 FPGAState::Body => {
                     self.send(*c);
+                    if self.bytes == 135100 {
+                       self.state = FPGAState::Post;
+                    }
+                }
+                FPGAState::Post => {
+                    self.send(*c);
                 }
             }
         }
-        return if self.bytes >= 135100 as u32 {
+        return if let FPGAState::Post = self.state {
             self.delay_ms(10_u8);
             for _ in 0..7 {
                 self.send(0x00 as u8);
@@ -124,9 +131,7 @@ impl Fpga {
             self.bytes = 0;
             self.state = FPGAState::Prelude;
             true
-        } else {
-            false
-        }
+        } else { false }
     }
 
     pub fn reset(&mut self) {
