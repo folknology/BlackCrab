@@ -122,6 +122,7 @@ impl Fpga {
                 }
             }
         }
+        // TODO could end up in FPGAState::Body for 0x7E file < 135100 bytes
         return if let FPGAState::Post = self.state {
             self.delay_ms(10_u8);
             for _ in 0..7 {
@@ -175,6 +176,113 @@ impl Fpga {
         self.bus.write(&[byte], transaction).unwrap();
     }
 
+    pub fn qbus1_send(&mut self, address: u32, byte: u8) {
+        let transaction = QspiTransaction {
+            iwidth: QspiWidth::SING,
+            awidth: QspiWidth::SING,
+            dwidth: QspiWidth::SING,//DUAL
+            instruction: 0,
+            address: Some(address),
+            dummy: 0,
+            data_len: Some(1),
+        };
+        self.ss.set_low();
+        self.bus.write(&[byte], transaction).unwrap();
+        self.ss.set_high();
+    }
+
+    pub fn qbus_reg(&mut self, command: u8, address: u32, buf: &mut[u8; 1]) {
+        //let mut nibbles= if let (command & 0x80) == 0 {0} else {2}
+        let read_nibbles = if command & 0x80 == 0 {0} else {2};
+        let transaction = QspiTransaction {
+            iwidth: QspiWidth::QUAD,
+            awidth: QspiWidth::QUAD,
+            dwidth: QspiWidth::QUAD,
+            instruction: command,
+            address: Some(address),
+            dummy: read_nibbles,
+            data_len: Some(1),
+        };
+        self.ss.set_low();
+        self.bus.write(buf, transaction).unwrap();
+        self.ss.set_high();
+    }
+
+    pub fn qbus_address(&mut self, address: u32, byte: u8) {
+        let transaction = QspiTransaction {
+            iwidth: QspiWidth::QUAD,
+            awidth: QspiWidth::QUAD,
+            dwidth: QspiWidth::QUAD,
+            instruction: 0,
+            address: Some(address),
+            dummy: 0,
+            data_len: Some(1),
+        };
+        self.bus.write(&[byte], transaction).unwrap();
+    }
+
+    pub fn qbus_send(&mut self, buf: &mut[u8; 16], len: usize) {
+        let transaction = QspiTransaction {
+            iwidth: QspiWidth::NONE,
+            awidth: QspiWidth::NONE,
+            dwidth: QspiWidth::QUAD,
+            instruction: 0,
+            address: None,
+            dummy: 0,
+            data_len: Some(len),
+        };
+        self.bus.write(buf, transaction).unwrap();
+    }
+
+    pub fn bus_send(&mut self, address:u32, buf: &mut[u8; 16], len: usize) {
+        const MAX_REG: u32 = 0x0000_FFFF;
+        let transaction = QspiTransaction {
+            iwidth: QspiWidth::NONE,
+            awidth: QspiWidth::QUAD,
+            dwidth: QspiWidth::QUAD,//DUAL
+            instruction: 0,
+            address: Some(address as u32 & MAX_REG),
+            dummy: 0,
+            data_len: Some(len),
+        };
+        //rprintln!("count:{}",_count as u8);
+        //let mut buf = [_count as u8];
+        self.ss.set_low();
+        self.bus.write(buf, transaction).unwrap();
+        self.ss.set_high();
+    }
+
+    pub fn val_send(&mut self, byte: u8) {
+        let transaction = QspiTransaction {
+            iwidth: QspiWidth::NONE,
+            awidth: QspiWidth::NONE,
+            dwidth: QspiWidth::QUAD,//DUAL
+            instruction: 0,
+            address: None,
+            dummy: 0,
+            data_len: Some(1),
+        };
+        self.ss.set_low();
+        self.bus.write(&[byte], transaction).unwrap();
+        self.ss.set_high();
+    }
+
+    pub fn reg_send(&mut self, reg: u8, byte: u8) {
+        const MAX_REG: u32 = 0x0000_00FF;
+        let transaction = QspiTransaction {
+            iwidth: QspiWidth::NONE,
+            awidth: QspiWidth::QUAD,
+            dwidth: QspiWidth::QUAD,//DUAL
+            instruction: 0,
+            address: Some(reg as u32 & MAX_REG),
+            dummy: 0,
+            data_len: Some(1),
+        };
+        self.ss.set_low();
+        self.bus.write(&[byte], transaction).unwrap();
+        self.ss.set_high();
+    }
+
     pub fn test_qspi(&mut self) {
         let count : u8 = 255;
         for _count  in 0..count {
@@ -198,11 +306,11 @@ impl Fpga {
         }
     }
 
-    fn transfer(&mut self, byte: u8) {
-        self.select();
-        self.send(byte);
-        self.deselect();
-    }
+    // fn transfer(&mut self, byte: u8) {
+    //     self.select();
+    //     self.send(byte);
+    //     self.deselect();
+    // }
 
 
 }
@@ -235,10 +343,6 @@ mod app {
     /* resources shared across RTIC tasks */
     #[shared]
     struct Shared {
-        ice: Fpga,
-        flash: Flash,
-        header: bool,
-        byte_count: u32,
         programmed: bool
     }
 
@@ -246,6 +350,8 @@ mod app {
     #[local]
     struct Local {
         command: u8,
+        ice: Fpga,
+        flash: Flash,
         serial: SerialPort<'static, UsbBus<USB>>,
         usb_cdc_device: UsbDevice<'static, UsbBus<USB>>
     }
@@ -318,7 +424,7 @@ mod app {
         let gpioc = device.GPIOC.split();
         let mut _done = gpioc.pc13.into_floating_input();
 
-        let bus = Qspi::new(&mut rcc, device.QUADSPI, 1, 1);
+        let bus = Qspi::new(&mut rcc, device.QUADSPI, 1, 4);
 
         let mut rcc_constrain = rcc.constrain();
 
@@ -385,10 +491,8 @@ mod app {
 
         //_done.set_low();
 
-        let header: bool = true;
-        let byte_count: u32 = 0;
         let programmed: bool = false;
-        let command = 0xff;
+        let command = 0x00;
 
         let ice = Fpga::new(ss, reset, delay, bus);
         rprintln!("Flash Id {:08x}", flash.id());
@@ -398,14 +502,12 @@ mod app {
         // lastly return the shared and local resources, as per RTIC's spec.
         (
             Shared {
-                ice,
-                flash,
-                header,
-                byte_count,
                 programmed,
             },
             Local {
                 command,
+                ice,
+                flash,
                 serial,
                 usb_cdc_device,
             },
@@ -420,109 +522,72 @@ mod app {
         }
     }
 
-    #[task(shared=[programmed, ice])]
-    fn manage(cx: manage::Context) {
-        let ice = cx.shared.ice;
-        let programmed = cx.shared.programmed;
-
-        (programmed, ice).lock(|programmed: &mut bool, ice: &mut Fpga| {
-            if *programmed {
-                for count in 0..16 {
-                    ice.delay_ms(100);
-                    ice.transfer(count as u8);
-                }
-            }
-        });
-    }
-
-    // #[task(shared=[programmed], local=[qspi_driver])]
-    // fn dspi(cx: dspi::Context) {
-    //     let driver = cx.local.qspi_driver;
-    //     let mut programmed = cx.shared.programmed;
+    // #[task(shared=[programmed, ice])]
+    // fn manage(cx: manage::Context) {
+    //     let ice = cx.shared.ice;
+    //     let programmed = cx.shared.programmed;
     //
-    //     programmed.lock(|programmed: &mut bool| {
+    //     (programmed, ice).lock(|programmed: &mut bool, ice: &mut Fpga| {
     //         if *programmed {
-    //             let count : u8 = 255;
-    //             for _count  in 0..count {
-    //                 let transaction = QspiTransaction {
-    //                     iwidth: QspiWidth::NONE,
-    //                     awidth: QspiWidth::NONE,
-    //                     dwidth: QspiWidth::QUAD,//DUAL
-    //                     instruction: 0,
-    //                     address: None,
-    //                     dummy: 0,
-    //                     data_len: Some(1),
-    //                 };
-    //                 //rprintln!("count:{}",_count as u8);
-    //                 //let mut buf = [_count as u8];
-    //                 driver.write(&[_count], transaction).unwrap();
-    //                 for _ in 0..100_000 {
-    //                     cortex_m::asm::nop();
-    //                 }
-    //                 //driver.poll_status();
+    //             for count in 0..16 {
+    //                 ice.delay_ms(100);
+    //                 ice.transfer(count as u8);
     //             }
     //         }
     //     });
     // }
 
 
-    #[task(binds = OTG_FS, shared=[ice, flash, header, byte_count, programmed], local=[command, serial, usb_cdc_device])]
+    #[task(binds = OTG_FS, shared=[programmed], local=[command, ice, flash, serial, usb_cdc_device])]
     fn usb_event(cx: usb_event::Context) {
         let usb_cdc_device = cx.local.usb_cdc_device; //: &mut UsbDevice<'static, UsbBus<USB>>
-        let serial = cx.local.serial;//: &mut SerialPort<'static, UsbBus<USB>>
-        let ice = cx.shared.ice; //: &mut FPGA
-        let _command = cx.local.command; // u8
-        let programmed = cx.shared.programmed; //bool
-        // let header = cx.shared.header;
-        // let byte_count = cx.shared.byte_count;
-
-
+        let serial = cx.local.serial;//: &mut SerialPort<'sStatic, UsbBus<USB>>
+        let ice = cx.local.ice; //: &mut FPGA
+        let command = cx.local.command; // u8
+        let mut programmed = cx.shared.programmed; //bool
 
         if usb_cdc_device.poll(&mut [serial]) {
             let mut buf: [u8; 512] = [0u8; 512];
 
             match serial.read(&mut buf) {
                 Ok(count) if count > 0 => {
-                    (programmed, ice).lock(|programmed, ice: &mut Fpga| {
-                    // (header, byte_count, programmed, ice).lock(|header, byte_count, programmed, ice: &mut Fpga| {
-                    //     * byte_count += count as u32;
-                    //     for c in buf[0..count].iter_mut() {
-                    //         if *header {
-                    //             if *c == 0x7E as u8 {
-                    //                 *programmed = false;
-                    //                 ice.reset();
-                    //                 ice.select();
-                    //                 *header = false;
-                    //                 ice.send(*c);
-                    //             } else {
-                    //                 rprintln!("Header Byte {:02x}", *c);
-                    //                 continue
-                    //             }
-                    //         } else {
-                    //             ice.send(*c);
-                    //         }
-                    //     }
-                    //     if *byte_count >= 135100 as u32 {
-                    //         *header = true;
-                    //         *byte_count = 0;
-                    //         ice.delay_ms(10_u8);
-                    //         for _ in 0..7 {
-                    //             ice.send(0x00 as u8);
-                    //         }
-                    //         ice.deselect();
-                    //         *programmed = true;
-                    //         // Maybe add a delay here before sending anything to HDL
-                    //         ice.delay_ms(100_u8);
-                    //         ice.test_qspi();
-                    //         //manage::spawn().unwrap();
-                    //         //dspi::spawn().unwrap();
-                    //     }
-                        *programmed = ice.prog(&mut buf, count);
-                        if *programmed {
-                            ice.delay_ms(100_u8);
-                            ice.test_qspi();
+                    if *command == 0x00 {
+                        *command = buf[0];
+                    }
+                    match *command {
+                        0xFF => {
+                            (programmed).lock(|programmed | {
+                                *programmed = ice.prog(&mut buf, count);
+                                if *programmed {
+                                    *command = 0x00;
+                                        rprintln!("Programed ILB");
+                                    // ice.delay_ms(100_u8);
+                                    // ice.test_qspi();
+                                }
+                            });
                         }
-                    });
+                        0x01 => {
+                            rprintln!("val:{}",buf[1]);
+                            ice.val_send(buf[1]);
+                            *command = 0x00;
+                        }
+                        0x02 => {
+                            rprintln!("reg,val:{},{}",buf[1],buf[2]);
+                            ice.reg_send(buf[1], buf[2]);
+                            *command = 0x00;
+                        }
+                        0x03 => {
+                            let address:u32 = u32::from(buf[1]) << 24 |
+                                                u32::from(buf[2]) << 16 |
+                                                u32::from(buf[3]) << 8 |
+                                                u32::from(buf[4]);
+                            rprintln!("write to address:{:08x}, with data: {:02x}",address,buf[5]);
+                            ice.qbus1_send(address, buf[5]);
+                            *command = 0x00;
+                        }
+                        _ => {rprintln!("count:{} bytes",count as u8);}
+                    }
+
                 }
                 _ => {}
             }
