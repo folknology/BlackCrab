@@ -389,7 +389,7 @@ mod app {
         let _qsck = gpiob.pb2.into_alternate::<9>()
             .internal_pull_up(true)
             .set_speed(Speed::VeryHigh);
-        let ss = gpiob.pb6.into_push_pull_output();
+        let mut ss = gpiob.pb6.into_push_pull_output();
             // .internal_pull_up(true)
             // .set_speed(Speed::VeryHigh);
 
@@ -488,6 +488,9 @@ mod app {
 
         // Set mode amber red led on with power green
         mode_led.set_low();
+
+        // Set fpga select high, deselected
+        ss.set_high();
 
         //_done.set_low();
 

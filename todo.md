@@ -44,5 +44,7 @@
 - [x] Add new SPI pins for STM Flash PB12-15:SS,SCK,SO,SI
 - [ ] Add UART/USB-CDC support from STM32 <-> Ice40
 - [ ] Add Flash programming support for Ice40 Images
-- [ ] Move HDL examples from ArachePnr to NextPnr
-- 
+- [x] Move HDL examples from ArachePnr to NextPnr
+- Update readme for BlackCrab to reflect Probe-run changes and library versions etc..
+- [ ] Update Tile specifications repo
+- [ ] Add Micro Blade repo
