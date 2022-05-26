@@ -487,7 +487,7 @@ mod app {
             .build();
 
         // Set mode amber red led on with power green
-        mode_led.set_low();
+        //mode_led.set_low();
 
         // Set fpga select high, deselected
         ss.set_high();
