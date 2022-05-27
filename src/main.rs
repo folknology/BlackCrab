@@ -400,7 +400,7 @@ mod app {
         // mode_button.trigger_on_edge(&mut exti, Edge::Rising);
         // mode_button.enable_interrupt(&mut exti);
 
-        let mut _mode_led = gpioe.pe5.into_push_pull_output();
+        let mut mode_led = gpioe.pe5.into_push_pull_output();
 
         let _q2 = gpioe.pe2.into_alternate::<9>()
             .internal_pull_up(true)
@@ -486,8 +486,8 @@ mod app {
             .self_powered(true)
             .build();
 
-        // Set mode amber red led on with power green
-        //mode_led.set_low();
+        // Set mode to green red mode led off on with power green on
+        mode_led.set_high();
 
         // Set fpga select high, deselected
         ss.set_high();
