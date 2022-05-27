@@ -45,6 +45,8 @@
 - [ ] Add UART/USB-CDC support from STM32 <-> Ice40
 - [ ] Add Flash programming support for Ice40 Images
 - [x] Move HDL examples from ArachePnr to NextPnr
-- Update readme for BlackCrab to reflect Probe-run changes and library versions etc..
+- [ ] Update readme for BlackCrab to reflect Probe-run changes and library versions etc..
 - [ ] Update Tile specifications repo
 - [ ] Add Micro Blade repo
+- [ ] Increase Tile hole size 0.1mm
+- 
