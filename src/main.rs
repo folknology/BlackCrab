@@ -400,7 +400,7 @@ mod app {
         // mode_button.trigger_on_edge(&mut exti, Edge::Rising);
         // mode_button.enable_interrupt(&mut exti);
 
-        let mut mode_led = gpioe.pe5.into_push_pull_output();
+        let mut _mode_led = gpioe.pe5.into_push_pull_output();
 
         let _q2 = gpioe.pe2.into_alternate::<9>()
             .internal_pull_up(true)
