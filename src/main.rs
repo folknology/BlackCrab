@@ -511,7 +511,7 @@ mod app {
         let gpioc = device.GPIOC.split();
         let mut _done = gpioc.pc13.into_floating_input();
 
-        let bus = Qspi::new(&mut rcc, device.QUADSPI, 1, 4);
+        let bus = Qspi::new(&mut rcc, device.QUADSPI, 1, 2);
 
         let mut rcc_constrain = rcc.constrain();
 
