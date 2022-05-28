@@ -232,10 +232,9 @@ impl Fpga {
         self.bus.write(&[byte], transaction).unwrap();
     }
 
-
     pub fn qbus_command(&mut self, command: u8, address:u32, buf: &mut[u8], len:usize) -> u32 {
         //const MAX_REG: u32 = 0x0000_FFFF;
-        let read_nibbles = if command & 0x80 == 0 {0} else {2*len};
+        let read_nibbles = if command & 0b10000000 == 0 {0} else {2*len};
         let transaction = QspiTransaction {
             iwidth: QspiWidth::QUAD,
             awidth: QspiWidth::QUAD,
@@ -512,7 +511,7 @@ mod app {
         let gpioc = device.GPIOC.split();
         let mut _done = gpioc.pc13.into_floating_input();
 
-        let bus = Qspi::new(&mut rcc, device.QUADSPI, 1, 4);
+        let bus = Qspi::new(&mut rcc, device.QUADSPI, 24, 3);
 
         let mut rcc_constrain = rcc.constrain();
 
