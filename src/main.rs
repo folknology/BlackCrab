@@ -136,7 +136,10 @@ impl Fpga {
     }
 
     pub fn qbus_write(&mut self, buf: &mut[u8; 512], count: usize) -> bool {
-        for c in buf[0..count].iter_mut() {
+        let mut transactions = (count-7) % 16;
+        let mut len: i8 = count as i8;
+        let mut index: usize = 5;
+        while len > 0 {
             match self.state {
                 FPGAState::Prelude => {
                     let comad: u8 = buf[2] & 0b01111111;
@@ -146,23 +149,19 @@ impl Fpga {
                         u32::from(buf[6]) << 16 |
                         u32::from(buf[7]) << 8 |
                         u32::from(buf[8]);
-                    let transactions = count % 16;
-                    let mut len: i8 = count as i8;
-                    let mut index: usize = 5;
-                    for _t in 0..transactions {
-                        len -= 16;
-                        let oldindex = index;
-                        index += 16;
-                        self.bytes -= ice.qbus4_command(comad, address, &mut buf[oldindex..index], 16 as usize);
-                    }
-                    if len > 0 {
+                    let oldindex = index;
+                    index += 16;
+                    self.bytes -= self.qbus_command(comad, address, &mut buf[oldindex..index], 16 as usize);
+                    len -= 16;
+                    transactions -= 1;
+                    if len > 0 { // Maybe this should always be true
                         self.state = FPGAState::Body;
-                        ;
                     }
-                    self.state = FPGAState::Body;
                 }
                 FPGAState::Body => {
-                    self.bytes -= ice.qbus_data(comad, address, &mut buf[index..], len as usize);
+                    for _t in 0..transactions {
+                        self.bytes -= self.qbus_data(0 as u8, &mut buf[index..], len as usize);
+                    }
                 }
                 FPGAState::Post => { // is this needed?
                     self.deselect();
@@ -276,7 +275,7 @@ impl Fpga {
         self.bus.write(buf, transaction).unwrap();
     }
 
-    pub fn qbus_command(&mut self, command: u8, address:u32, buf: &mut[u8], len:) -> usize {
+    pub fn qbus_command(&mut self, command: u8, address:u32, buf: &mut[u8], len:usize) -> u32 {
         //const MAX_REG: u32 = 0x0000_FFFF;
         let read_nibbles = if command & 0x80 == 0 {0} else {2*len};
         let transaction = QspiTransaction {
@@ -291,12 +290,12 @@ impl Fpga {
         //rprintln!("count:{}",_count as u8);
         //let mut buf = [_count as u8];
         self.ss.set_low();
-        self.bus.write(buf, transaction).unwrap()
-        len
+        self.bus.write(buf, transaction).unwrap();
+        len as u32
         // self.ss.set_high();
     }
 
-    pub fn qbus_data(&mut self, address:u32, buf: &mut[u8], len: usize) -> usize {
+    pub fn qbus_data(&mut self, command:u8, buf: &mut[u8], len: usize) -> u32 {
         let read_nibbles = if command & 0x80 == 0 {0} else {2*len};
         let transaction = QspiTransaction {
             iwidth: QspiWidth::NONE,
@@ -310,7 +309,7 @@ impl Fpga {
         //rprintln!("count:{}",_count as u8);
         //let mut buf = [_count as u8];
         self.bus.write(buf, transaction).unwrap();
-        len
+        len as u32
     }
 
     pub fn bus_send(&mut self, address:u32, buf: &mut[u8; 16], len: usize) {
