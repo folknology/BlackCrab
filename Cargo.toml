@@ -62,6 +62,8 @@ usb_fs = ["synopsys-usb-otg", "synopsys-usb-otg/fs"]
 
 [dependencies.stm32f7xx-hal]
 features = ["stm32f730","device-selected", "usb_hs_phy", "usb_fs", "rt"]
-path = "../stm32f7xx-hal"
+git = "https://github.com/folknology/stm32f7xx-hal"
 #git = "https://github.com/stm32-rs/stm32f7xx-hal"
+#path = "../stm32f7xx-hal"
+
 
