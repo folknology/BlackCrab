@@ -136,14 +136,15 @@ impl Fpga {
     }
 
     pub fn qbus_write(&mut self, buf: &mut[u8; 512], count: usize) -> bool {
+        const HEAD: usize = 9; // number of bytes in header CAAAALLLL
         let mut len: usize = count;
         let mut index: usize = 0;
         let mut bytes: usize;
+        let mut old_index = index;
         while len > 0 {
-            let mut old_index = index;
             match self.state {
                 FPGAState::Prelude => {
-                    if len > (16 + 9) { bytes = 16 } else {bytes = len - 9};
+                    if len > (15 + HEAD) { bytes = 16 } else {bytes = len - HEAD};
                     let comad: u8 = buf[2] & 0b01111111;
                     let address: u32 = u32::from(buf[3]) << 8 |
                         u32::from(buf[4]);
@@ -151,21 +152,30 @@ impl Fpga {
                         u32::from(buf[6]) << 16 |
                         u32::from(buf[7]) << 8 |
                         u32::from(buf[8]);
-                    old_index += 9;
-                    index += bytes + 9;
+                    old_index += HEAD;
+                    index += bytes + HEAD;
                     self.select();
                     self.bytes -= self.qbus_command(comad, address, &mut buf[old_index..index], bytes);
-                    len -= bytes + 9;
+                    len -= bytes + HEAD;
                     self.state = FPGAState::Body;
                 }
                 FPGAState::Body => {
-                    if len > 16 { bytes = 16 } else {bytes = len};
-                    let transactions: usize = len % 16;
-                    index += bytes;
-                    for _t in 0..transactions {
+                    if len > 16 {
+                        bytes = 16;
+                        let transactions: usize = len % 16;
+                        for _t in 0..transactions {
+                            old_index = index;
+                            index += bytes;
+                            self.bytes -= self.qbus_data(0 as u8, &mut buf[old_index..index], bytes);
+                            len -= bytes;
+                        }
+                    } else {
+                        bytes = len;
+                        index += bytes;
                         self.bytes -= self.qbus_data(0 as u8, &mut buf[old_index..index], bytes);
-                    }
-                    len -= bytes;
+                        len -= bytes;
+                    };
+
                 }
                 FPGAState::Post => { // is this needed?
                     self.deselect();
