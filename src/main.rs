@@ -153,6 +153,7 @@ impl Fpga {
                         u32::from(buf[8]);
                     index += bytes;
                     self.bytes -= self.qbus_command(comad, address, &mut buf[old_index..index], bytes);
+                    len -= bytes;
                     self.state = FPGAState::Body;
                 }
                 FPGAState::Body => {
