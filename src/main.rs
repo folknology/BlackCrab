@@ -145,6 +145,7 @@ impl Fpga {
             match self.state {
                 FPGAState::Prelude => {
                     if len > (15 + HEAD) { bytes = 16 } else {bytes = len - HEAD};
+                    // Ignore buf[1] MSB as out of address range
                     let comad: u8 = buf[2] & 0b01111111;
                     let address: u32 = u32::from(buf[3]) << 8 |
                         u32::from(buf[4]);
@@ -231,63 +232,6 @@ impl Fpga {
         self.bus.write(&[byte], transaction).unwrap();
     }
 
-    pub fn qbus1_send(&mut self, address: u32, byte: u8) {
-        let transaction = QspiTransaction {
-            iwidth: QspiWidth::SING,
-            awidth: QspiWidth::SING,
-            dwidth: QspiWidth::SING,//DUAL
-            instruction: 0,
-            address: Some(address),
-            dummy: 0,
-            data_len: Some(1),
-        };
-        self.ss.set_low();
-        self.bus.write(&[byte], transaction).unwrap();
-        self.ss.set_high();
-    }
-
-    pub fn qbus_reg(&mut self, command: u8, address: u32, buf: &mut[u8; 1]) {
-        //let mut nibbles= if let (command & 0x80) == 0 {0} else {2}
-        let read_nibbles = if command & 0x80 == 0 {0} else {2};
-        let transaction = QspiTransaction {
-            iwidth: QspiWidth::QUAD,
-            awidth: QspiWidth::QUAD,
-            dwidth: QspiWidth::QUAD,
-            instruction: command,
-            address: Some(address),
-            dummy: read_nibbles,
-            data_len: Some(1),
-        };
-        self.ss.set_low();
-        self.bus.write(buf, transaction).unwrap();
-        self.ss.set_high();
-    }
-
-    pub fn qbus_address(&mut self, address: u32, byte: u8) {
-        let transaction = QspiTransaction {
-            iwidth: QspiWidth::QUAD,
-            awidth: QspiWidth::QUAD,
-            dwidth: QspiWidth::QUAD,
-            instruction: 0,
-            address: Some(address),
-            dummy: 0,
-            data_len: Some(1),
-        };
-        self.bus.write(&[byte], transaction).unwrap();
-    }
-
-    pub fn qbus_send(&mut self, buf: &mut[u8; 16], len: usize) {
-        let transaction = QspiTransaction {
-            iwidth: QspiWidth::NONE,
-            awidth: QspiWidth::NONE,
-            dwidth: QspiWidth::QUAD,
-            instruction: 0,
-            address: None,
-            dummy: 0,
-            data_len: Some(len),
-        };
-        self.bus.write(buf, transaction).unwrap();
-    }
 
     pub fn qbus_command(&mut self, command: u8, address:u32, buf: &mut[u8], len:usize) -> u32 {
         //const MAX_REG: u32 = 0x0000_FFFF;
@@ -301,11 +245,8 @@ impl Fpga {
             dummy: read_nibbles as u8,
             data_len: Some(len),
         };
-        //rprintln!("count:{}",_count as u8);
-        //let mut buf = [_count as u8];
         self.bus.write(buf, transaction).unwrap();
         len as u32
-        // self.ss.set_high();
     }
 
     pub fn qbus_data(&mut self, command:u8, buf: &mut[u8], len: usize) -> u32 {
@@ -319,60 +260,116 @@ impl Fpga {
             dummy: read_nibbles as u8,
             data_len: Some(len),
         };
-        //rprintln!("count:{}",_count as u8);
-        //let mut buf = [_count as u8];
         self.bus.write(buf, transaction).unwrap();
         len as u32
     }
 
-    pub fn bus_send(&mut self, address:u32, buf: &mut[u8; 16], len: usize) {
-        const MAX_REG: u32 = 0x0000_FFFF;
-        let transaction = QspiTransaction {
-            iwidth: QspiWidth::NONE,
-            awidth: QspiWidth::QUAD,
-            dwidth: QspiWidth::QUAD,//DUAL
-            instruction: 0,
-            address: Some(address as u32 & MAX_REG),
-            dummy: 0,
-            data_len: Some(len),
-        };
-        //rprintln!("count:{}",_count as u8);
-        //let mut buf = [_count as u8];
-        self.ss.set_low();
-        self.bus.write(buf, transaction).unwrap();
-        self.ss.set_high();
-    }
+    // pub fn qbus1_send(&mut self, address: u32, byte: u8) {
+    //     let transaction = QspiTransaction {
+    //         iwidth: QspiWidth::SING,
+    //         awidth: QspiWidth::SING,
+    //         dwidth: QspiWidth::SING,//DUAL
+    //         instruction: 0,
+    //         address: Some(address),
+    //         dummy: 0,
+    //         data_len: Some(1),
+    //     };
+    //     self.ss.set_low();
+    //     self.bus.write(&[byte], transaction).unwrap();
+    //     self.ss.set_high();
+    // }
+    //
+    // pub fn qbus_reg(&mut self, command: u8, address: u32, buf: &mut[u8; 1]) {
+    //     //let mut nibbles= if let (command & 0x80) == 0 {0} else {2}
+    //     let read_nibbles = if command & 0x80 == 0 {0} else {2};
+    //     let transaction = QspiTransaction {
+    //         iwidth: QspiWidth::QUAD,
+    //         awidth: QspiWidth::QUAD,
+    //         dwidth: QspiWidth::QUAD,
+    //         instruction: command,
+    //         address: Some(address),
+    //         dummy: read_nibbles,
+    //         data_len: Some(1),
+    //     };
+    //     self.ss.set_low();
+    //     self.bus.write(buf, transaction).unwrap();
+    //     self.ss.set_high();
+    // }
+    //
+    // pub fn qbus_address(&mut self, address: u32, byte: u8) {
+    //     let transaction = QspiTransaction {
+    //         iwidth: QspiWidth::QUAD,
+    //         awidth: QspiWidth::QUAD,
+    //         dwidth: QspiWidth::QUAD,
+    //         instruction: 0,
+    //         address: Some(address),
+    //         dummy: 0,
+    //         data_len: Some(1),
+    //     };
+    //     self.bus.write(&[byte], transaction).unwrap();
+    // }
+    //
+    // pub fn qbus_send(&mut self, buf: &mut[u8; 16], len: usize) {
+    //     let transaction = QspiTransaction {
+    //         iwidth: QspiWidth::NONE,
+    //         awidth: QspiWidth::NONE,
+    //         dwidth: QspiWidth::QUAD,
+    //         instruction: 0,
+    //         address: None,
+    //         dummy: 0,
+    //         data_len: Some(len),
+    //     };
+    //     self.bus.write(buf, transaction).unwrap();
+    // }
 
-    pub fn val_send(&mut self, byte: u8) {
-        let transaction = QspiTransaction {
-            iwidth: QspiWidth::NONE,
-            awidth: QspiWidth::NONE,
-            dwidth: QspiWidth::QUAD,//DUAL
-            instruction: 0,
-            address: None,
-            dummy: 0,
-            data_len: Some(1),
-        };
-        self.ss.set_low();
-        self.bus.write(&[byte], transaction).unwrap();
-        self.ss.set_high();
-    }
-
-    pub fn reg_send(&mut self, reg: u8, byte: u8) {
-        const MAX_REG: u32 = 0x0000_00FF;
-        let transaction = QspiTransaction {
-            iwidth: QspiWidth::NONE,
-            awidth: QspiWidth::QUAD,
-            dwidth: QspiWidth::QUAD,//DUAL
-            instruction: 0,
-            address: Some(reg as u32 & MAX_REG),
-            dummy: 0,
-            data_len: Some(1),
-        };
-        self.ss.set_low();
-        self.bus.write(&[byte], transaction).unwrap();
-        self.ss.set_high();
-    }
+    // pub fn bus_send(&mut self, address:u32, buf: &mut[u8; 16], len: usize) {
+    //     const MAX_REG: u32 = 0x0000_FFFF;
+    //     let transaction = QspiTransaction {
+    //         iwidth: QspiWidth::NONE,
+    //         awidth: QspiWidth::QUAD,
+    //         dwidth: QspiWidth::QUAD,//DUAL
+    //         instruction: 0,
+    //         address: Some(address as u32 & MAX_REG),
+    //         dummy: 0,
+    //         data_len: Some(len),
+    //     };
+    //     //rprintln!("count:{}",_count as u8);
+    //     //let mut buf = [_count as u8];
+    //     self.ss.set_low();
+    //     self.bus.write(buf, transaction).unwrap();
+    //     self.ss.set_high();
+    // }
+    //
+    // pub fn val_send(&mut self, byte: u8) {
+    //     let transaction = QspiTransaction {
+    //         iwidth: QspiWidth::NONE,
+    //         awidth: QspiWidth::NONE,
+    //         dwidth: QspiWidth::QUAD,//DUAL
+    //         instruction: 0,
+    //         address: None,
+    //         dummy: 0,
+    //         data_len: Some(1),
+    //     };
+    //     self.ss.set_low();
+    //     self.bus.write(&[byte], transaction).unwrap();
+    //     self.ss.set_high();
+    // }
+    //
+    // pub fn reg_send(&mut self, reg: u8, byte: u8) {
+    //     const MAX_REG: u32 = 0x0000_00FF;
+    //     let transaction = QspiTransaction {
+    //         iwidth: QspiWidth::NONE,
+    //         awidth: QspiWidth::QUAD,
+    //         dwidth: QspiWidth::QUAD,//DUAL
+    //         instruction: 0,
+    //         address: Some(reg as u32 & MAX_REG),
+    //         dummy: 0,
+    //         data_len: Some(1),
+    //     };
+    //     self.ss.set_low();
+    //     self.bus.write(&[byte], transaction).unwrap();
+    //     self.ss.set_high();
+    // }
 
     pub fn test_qspi(&mut self) {
         let count : u8 = 255;
@@ -649,7 +646,7 @@ mod app {
                         *command = buf[0];
                     }
                     match *command {
-                        0xFF => {
+                        0xFF => { //rogram FPGA
                             (programmed).lock(|programmed | {
                                 *programmed = ice.prog(&mut buf, count);
                                 if *programmed {
@@ -660,14 +657,12 @@ mod app {
                                 }
                             });
                         }
-                        0x01 => {
-                            rprintln!("val:{}",buf[1]);
-                            ice.val_send(buf[1]);
+                        0x01 => { // Write spi flash
+                            rprintln!("SPI Flash write not implemented");
                             *command = 0x00;
                         }
-                        0x02 => {
-                            rprintln!("reg,val:{},{}",buf[1],buf[2]);
-                            ice.reg_send(buf[1], buf[2]);
+                        0x02 => { // Read spi flash
+                            rprintln!("SPI Flash read not implemented");
                             *command = 0x00;
                         }
                         0x03 => { //Write QSPI bit should 0
@@ -677,12 +672,13 @@ mod app {
                             }
                         }
                         0x04 => { //Read QSPI bit should 1
+                            rprintln!("ILB qbus Read not implemented");
                             // let comad : u8 = 0b10000000 | (buf[2] & 0b01111111);
                             // let address:u32 = u32::from(buf[3]) << 8 |
                             //                     u32::from(buf[4]);
                             *command = 0x00;
                         }
-                        _ => {rprintln!("count:{} bytes",count as u8);}
+                        _ => {rprintln!("No command, count:{} bytes",count as u8);}
                     }
 
                 }
