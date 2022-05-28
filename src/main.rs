@@ -136,9 +136,9 @@ impl Fpga {
     }
 
     pub fn qbus_write(&mut self, buf: &mut[u8; 512], count: usize) -> bool {
-        let mut transactions = (count-7) % 16;
+        let mut transactions = (count-9) % 16;
         let mut len: i8 = count as i8;
-        let mut index: usize = 5;
+        let mut index: usize = 9;
         while len > 0 {
             match self.state {
                 FPGAState::Prelude => {
@@ -149,9 +149,9 @@ impl Fpga {
                         u32::from(buf[6]) << 16 |
                         u32::from(buf[7]) << 8 |
                         u32::from(buf[8]);
-                    let oldindex = index;
+                    let old_index = index;
                     index += 16;
-                    self.bytes -= self.qbus_command(comad, address, &mut buf[oldindex..index], 16 as usize);
+                    self.bytes -= self.qbus_command(comad, address, &mut buf[old_index..index], 16 as usize);
                     len -= 16;
                     transactions -= 1;
                     self.state = FPGAState::Body;
