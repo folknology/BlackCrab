@@ -135,6 +135,48 @@ impl Fpga {
         } else { false }
     }
 
+    pub fn qbus_write(&mut self, buf: &mut[u8; 512], count: usize) -> bool {
+        for c in buf[0..count].iter_mut() {
+            match self.state {
+                FPGAState::Prelude => {
+                    let comad: u8 = buf[2] & 0b01111111;
+                    let address: u32 = u32::from(buf[3]) << 8 |
+                        u32::from(buf[4]);
+                    self.bytes = u32::from(buf[5]) << 24 |
+                        u32::from(buf[6]) << 16 |
+                        u32::from(buf[7]) << 8 |
+                        u32::from(buf[8]);
+                    let transactions = count % 16;
+                    let mut len: i8 = count as i8;
+                    let mut index: usize = 5;
+                    for _t in 0..transactions {
+                        len -= 16;
+                        let oldindex = index;
+                        index += 16;
+                        self.bytes -= ice.qbus4_command(comad, address, &mut buf[oldindex..index], 16 as usize);
+                    }
+                    if len > 0 {
+                        self.state = FPGAState::Body;
+                        ;
+                    }
+                    self.state = FPGAState::Body;
+                }
+                FPGAState::Body => {
+                    self.bytes -= ice.qbus_data(comad, address, &mut buf[index..], len as usize);
+                }
+                FPGAState::Post => { // is this needed?
+                    self.deselect();
+                    self.state = FPGAState::Prelude;
+                }
+            }
+        }
+        if self.bytes == 0 {
+            self.deselect();
+            self.state = FPGAState::Prelude;
+            true
+        } else {false}
+    }
+
     pub fn reset(&mut self) {
         self.ss.set_high();
         self.reset.set_low();
@@ -234,7 +276,7 @@ impl Fpga {
         self.bus.write(buf, transaction).unwrap();
     }
 
-    pub fn qbus4_send(&mut self, command: u8, address:u32, buf: &mut[u8], len: usize) {
+    pub fn qbus_command(&mut self, command: u8, address:u32, buf: &mut[u8], len:) -> usize {
         //const MAX_REG: u32 = 0x0000_FFFF;
         let read_nibbles = if command & 0x80 == 0 {0} else {2*len};
         let transaction = QspiTransaction {
@@ -244,13 +286,31 @@ impl Fpga {
             instruction: command,
             address: Some(address),
             dummy: read_nibbles as u8,
-            data_len: Some(1),
+            data_len: Some(len),
         };
         //rprintln!("count:{}",_count as u8);
         //let mut buf = [_count as u8];
         self.ss.set_low();
+        self.bus.write(buf, transaction).unwrap()
+        len
+        // self.ss.set_high();
+    }
+
+    pub fn qbus_data(&mut self, address:u32, buf: &mut[u8], len: usize) -> usize {
+        let read_nibbles = if command & 0x80 == 0 {0} else {2*len};
+        let transaction = QspiTransaction {
+            iwidth: QspiWidth::NONE,
+            awidth: QspiWidth::NONE,
+            dwidth: QspiWidth::QUAD,//DUAL
+            instruction: 0,
+            address: None,
+            dummy: read_nibbles as u8,
+            data_len: Some(len),
+        };
+        //rprintln!("count:{}",_count as u8);
+        //let mut buf = [_count as u8];
         self.bus.write(buf, transaction).unwrap();
-        self.ss.set_high();
+        len
     }
 
     pub fn bus_send(&mut self, address:u32, buf: &mut[u8; 16], len: usize) {
@@ -599,30 +659,16 @@ mod app {
                             *command = 0x00;
                         }
                         0x03 => { //Write QSPI bit should 0
-                            let comad : u8 = buf[2] & 0b01111111;
-                            let address:u32 = u32::from(buf[3]) << 8 |
-                                                u32::from(buf[4]);
-                            rprintln!("write to comad {:02x}, address:{:08x}, with {:02x} bytes",
-                                comad,
-                                address,
-                                count);
-                            let transactions = count % 16;
-                            let mut len:i8 = count as i8;
-                            let mut index:usize = 5;
-                            for _t in 0..transactions {
-                                len -= 16;
-                                let oldindex = index;
-                                index += 16;
-                                ice.qbus4_send(comad, address, &mut buf[oldindex..index], 16 as usize);
-                            }
-                            if len > 0 {
-                                ice.qbus4_send(comad, address, &mut buf[index..], len as usize);
+                            if ice.qbus_write(&mut buf, count) {
+                                *command = 0x00;
+                                rprintln!("Transferred data to ILB");
                             }
                         }
                         0x04 => { //Read QSPI bit should 1
                             // let comad : u8 = 0b10000000 | (buf[2] & 0b01111111);
                             // let address:u32 = u32::from(buf[3]) << 8 |
                             //                     u32::from(buf[4]);
+                            *command = 0x00;
                         }
                         _ => {rprintln!("count:{} bytes",count as u8);}
                     }
