@@ -152,14 +152,14 @@ impl Fpga {
                         u32::from(buf[7]) << 8 |
                         u32::from(buf[8]);
                     index += bytes;
-                    self.bytes -= self.qbus_command(comad, address, &mut buf[old_index..index], 16 as usize);
+                    self.bytes -= self.qbus_command(comad, address, &mut buf[old_index..index], bytes);
                     self.state = FPGAState::Body;
                 }
                 FPGAState::Body => {
                     let transactions: usize = len % 16;
                     index += bytes;
                     for _t in 0..transactions {
-                        self.bytes -= self.qbus_data(0 as u8, &mut buf[old_index..index], len as usize);
+                        self.bytes -= self.qbus_data(0 as u8, &mut buf[old_index..index], bytes);
                     }
                     len -= bytes;
                 }
