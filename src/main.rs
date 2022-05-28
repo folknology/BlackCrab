@@ -154,9 +154,7 @@ impl Fpga {
                     self.bytes -= self.qbus_command(comad, address, &mut buf[oldindex..index], 16 as usize);
                     len -= 16;
                     transactions -= 1;
-                    if len > 0 { // Maybe this should always be true
-                        self.state = FPGAState::Body;
-                    }
+                    self.state = FPGAState::Body;
                 }
                 FPGAState::Body => {
                     for _t in 0..transactions {
