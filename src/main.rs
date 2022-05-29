@@ -101,7 +101,8 @@ impl Fpga {
             self.bytes += 1;
             match self.state {
                 FPGAState::Prelude => {
-                    self.bus.prescale(31);
+                    // Set bus speed to lower for programming the Ice40
+                    self.bus.prescale(15);
                     if *c == 0x7E as u8 {
                         self.reset();
                         self.select();
@@ -131,7 +132,8 @@ impl Fpga {
             self.deselect();
             self.delay_ms(10_u8);
             self.bytes = 0;
-            self.bus.prescale(15);
+            // Set bus speed higher for QSPI transfers
+            self.bus.prescale(7);
             self.state = FPGAState::Prelude;
             true
         } else { false }
@@ -150,8 +152,9 @@ impl Fpga {
                         u32::from(buf[6]) << 16 |
                         u32::from(buf[7]) << 8 |
                         u32::from(buf[8]);
-                    index += HEAD;
+                    self.select();
                     self.qbus_command(comad, &mut buf[3..5], 2);
+                    index += HEAD;
                     len -= HEAD;
                     self.state = FPGAState::Body;
                 }
