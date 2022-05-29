@@ -101,6 +101,7 @@ impl Fpga {
             self.bytes += 1;
             match self.state {
                 FPGAState::Prelude => {
+                    self.bus.prescale(31);
                     if *c == 0x7E as u8 {
                         self.reset();
                         self.select();
@@ -124,12 +125,13 @@ impl Fpga {
         }
         // TODO could end up in FPGAState::Body for 0x7E file < 135100 bytes
         return if let FPGAState::Post = self.state {
-            self.delay_ms(10_u8);
             for _ in 0..7 {
                 self.send(0x00 as u8);
             }
             self.deselect();
+            self.delay_ms(10_u8);
             self.bytes = 0;
+            self.bus.prescale(15);
             self.state = FPGAState::Prelude;
             true
         } else { false }
@@ -140,27 +142,21 @@ impl Fpga {
         let mut len: usize = count;
         let mut index: usize = 0;
         let mut bytes: usize;
-        let mut old_index = index;
         while len > 0 {
             match self.state {
                 FPGAState::Prelude => {
-                    if len > (15 + HEAD) { bytes = 16 } else {bytes = len - HEAD};
-                    // Ignore buf[1] MSB as out of address range
                     let comad: u8 = buf[2] & 0b01111111;
-                    let address: u32 = u32::from(buf[3]) << 8 |
-                        u32::from(buf[4]);
                     self.bytes = u32::from(buf[5]) << 24 |
                         u32::from(buf[6]) << 16 |
                         u32::from(buf[7]) << 8 |
                         u32::from(buf[8]);
-                    old_index += HEAD;
-                    index += bytes + HEAD;
-                    self.select();
-                    self.bytes -= self.qbus_command(comad, address, &mut buf[old_index..index], bytes);
-                    len -= bytes + HEAD;
+                    index += HEAD;
+                    self.qbus_command(comad, &mut buf[3..5], 2);
+                    len -= HEAD;
                     self.state = FPGAState::Body;
                 }
                 FPGAState::Body => {
+                    let mut old_index = index;
                     if len > 16 {
                         bytes = 16;
                         let transactions: usize = len % 16;
@@ -232,15 +228,15 @@ impl Fpga {
         self.bus.write(&[byte], transaction).unwrap();
     }
 
-    pub fn qbus_command(&mut self, command: u8, address:u32, buf: &mut[u8], len:usize) -> u32 {
+    pub fn qbus_command(&mut self, command: u8, buf: &mut[u8], len:usize) -> u32 {
         //const MAX_REG: u32 = 0x0000_FFFF;
         let read_nibbles = if command & 0b10000000 == 0 {0} else {2*len};
         let transaction = QspiTransaction {
             iwidth: QspiWidth::QUAD,
-            awidth: QspiWidth::QUAD,
+            awidth: QspiWidth::NONE,
             dwidth: QspiWidth::QUAD,
             instruction: command,
-            address: Some(address),
+            address: None, // address
             dummy: read_nibbles as u8,
             data_len: Some(len),
         };
@@ -525,7 +521,7 @@ mod app {
             .mco1(MCO1::Hse)
             .freeze();
 
-        let spi = Spi::new(device.SPI2,(fck, fso, fsi))
+let spi = Spi::new(device.SPI2,(fck, fso, fsi))
             .enable(
                 Mode{polarity: Polarity::IdleLow, phase: Phase::CaptureOnFirstTransition},
                 1_000_000.Hz(),
