@@ -133,7 +133,7 @@ impl Fpga {
             self.delay_ms(10_u8);
             self.bytes = 0;
             // Set bus speed higher for QSPI transfers
-            self.bus.prescale(7);
+            self.bus.prescale(15);
             self.state = FPGAState::Prelude;
             true
         } else { false }
@@ -143,39 +143,37 @@ impl Fpga {
         const HEAD: usize = 9; // number of bytes in header CAAAALLLL
         let mut len: usize = count;
         let mut index: usize = 0;
-        let mut bytes: usize;
         while len > 0 {
             match self.state {
-                FPGAState::Prelude => {
-                    let comad: u8 = buf[2] & 0b01111111;
+                FPGAState::Prelude => { // Header
+                    // let comad: u8 = buf[2] & 0b01111111;
+                    buf[2] &= 0b01111111;
                     self.bytes = u32::from(buf[5]) << 24 |
                         u32::from(buf[6]) << 16 |
                         u32::from(buf[7]) << 8 |
                         u32::from(buf[8]);
                     self.select();
-                    self.qbus_command(comad, &mut buf[3..5], 2);
-                    index += HEAD;
+                    // self.qbus_command(comad, &mut buf[3..5], 2);
+                    self.qbus_command(buf[2], &mut buf[3..5], 2);
+                    //self.qbus_wdata(&mut buf[2..5], 3);
+                    index = HEAD;
                     len -= HEAD;
                     self.state = FPGAState::Body;
                 }
-                FPGAState::Body => {
+                FPGAState::Body => { // Data
                     let mut old_index = index;
-                    if len > 16 {
-                        bytes = 16;
-                        let transactions: usize = len % 16;
-                        for _t in 0..transactions {
+                    if len > 1 {
+                        for _t in 0..len / 2 {
                             old_index = index;
-                            index += bytes;
-                            self.bytes -= self.qbus_data(0 as u8, &mut buf[old_index..index], bytes);
-                            len -= bytes;
+                            index += 2;
+                            self.bytes -= self.qbus_wdata(&mut buf[old_index..index], 2);
+                            len -= 2;
                         }
                     } else {
-                        bytes = len;
-                        index += bytes;
-                        self.bytes -= self.qbus_data(0 as u8, &mut buf[old_index..index], bytes);
-                        len -= bytes;
-                    };
-
+                        index += 1;
+                        self.bytes -= self.qbus_wdata(&mut buf[old_index..index], 1);
+                        len -= 1;
+                    }
                 }
                 FPGAState::Post => { // is this needed?
                     self.deselect();
@@ -247,15 +245,28 @@ impl Fpga {
         len as u32
     }
 
-    pub fn qbus_data(&mut self, command:u8, buf: &mut[u8], len: usize) -> u32 {
-        let read_nibbles = if command & 0x80 == 0 {0} else {2*len};
+    pub fn qbus_wdata(&mut self, buf: &mut[u8], len: usize) -> u32 {
         let transaction = QspiTransaction {
             iwidth: QspiWidth::NONE,
             awidth: QspiWidth::NONE,
             dwidth: QspiWidth::QUAD,//DUAL
             instruction: 0,
             address: None,
-            dummy: read_nibbles as u8,
+            dummy: 0,
+            data_len: Some(len),
+        };
+        self.bus.write(buf, transaction).unwrap();
+        len as u32
+    }
+
+    pub fn qbus_rdata(&mut self, buf: &mut[u8], len: usize) -> u32 {
+        let transaction = QspiTransaction {
+            iwidth: QspiWidth::NONE,
+            awidth: QspiWidth::NONE,
+            dwidth: QspiWidth::QUAD,//DUAL
+            instruction: 0,
+            address: None,
+            dummy: 2*len as u8,
             data_len: Some(len),
         };
         self.bus.write(buf, transaction).unwrap();
@@ -510,7 +521,7 @@ mod app {
         let gpioc = device.GPIOC.split();
         let mut _done = gpioc.pc13.into_floating_input();
 
-        let bus = Qspi::new(&mut rcc, device.QUADSPI, 1, 2);
+        let bus = Qspi::new(&mut rcc, device.QUADSPI, 1, 1);
 
         let mut rcc_constrain = rcc.constrain();
 
@@ -664,6 +675,7 @@ let spi = Spi::new(device.SPI2,(fck, fso, fsi))
                             *command = 0x00;
                         }
                         0x03 => { //Write QSPI bit should 0
+                            rprintln!("Transferring data {} bytes", count);
                             if ice.qbus_write(&mut buf, count) {
                                 *command = 0x00;
                                 rprintln!("Transferred data to ILB");
