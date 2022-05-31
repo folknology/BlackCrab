@@ -90,6 +90,7 @@ impl Flash {
     }
 
     pub fn transfer(&mut self, data: &mut[u8;4]) {
+        rprintln!("SPI Flash transfer");
         self.ss.set_low();
         self.spi.transfer(&mut data.as_mut_slice()).unwrap();
         self.ss.set_high();
@@ -112,8 +113,6 @@ impl Flash {
 }
 
 pub struct Fpga {
-    bytes:u32,
-    state:FPGAState,
     var: ActionVar,
     ss: PB6<Output<PushPull>>,
     reset: PB4<Output<PushPull>>,
@@ -125,7 +124,10 @@ impl Action for Fpga {
     fn run(&mut self, command: u8, buf: &mut[u8; 512], count: usize ) -> bool {
         self.var.command = command;
         self.var.len = count;
-        if !self.prep(buf) { return false };
+        self.var.index = 0;
+        if self.var.target == 0 {
+            if !self.prep(buf) { return false };
+        }
         while self.var.len > 0 {
             self.act(buf) ;
         }
@@ -157,21 +159,25 @@ impl Action for Fpga {
                 self.var.target = 135100 as usize;
                 head = 0;
                 while buf[head] != 0x7E as u8  {
-                    if head < self.var.len { head += 1 } else { rprintln!("Count {:08x}, head  {:08x}", self.var.len, head); return false }
+                    if head < self.var.len { head += 1 } else { return false }
                 }
+                self.select();
+                self.var.target-= head - 1;
+                self.var.target -= self.write(&mut buf[head-1..head], 1);
                 self.reset();
             }
             Command::QSPI_BUS_WRITE => {
                 buf[2] &= 0b01111111;
-
+                self.select();
+                self.command(buf[2],&mut buf[3..5], 2);
             }
             Command::QSPI_BUS_READ => {
                 buf[2] |= 0b10000000;
+                self.select();
+                self.command(buf[2],&mut buf[3..5], 2);
             }
             _ => ()
         }
-        self.select();
-        self.command(buf[2],&mut buf[3..5], 2);
         self.var.index = head;
         self.var.len -= head;
         true
@@ -234,13 +240,6 @@ impl Device for Fpga {
     }
 }
 
-//Depreciated, remove
-enum FPGAState {
-    Prelude,
-    Body,
-    Post
-}
-
 impl Fpga {
     pub fn new(
                ss: PB6<Output<PushPull>>,
@@ -248,8 +247,6 @@ impl Fpga {
                delay: SysDelay,
                bus : Qspi) -> Fpga {
         Fpga {
-            bytes:0,
-            state:FPGAState::Prelude,
             var: ActionVar::new(Command::NONE, QspiWidth::SING),
             ss,
             reset,
@@ -285,62 +282,6 @@ impl Fpga {
     pub fn deselect(&mut self) { self.ss.set_high(); }
 
     fn delay_ms(&mut self, ms: u8) { self.delay.delay_ms(ms); }
-
-    pub fn prog(&mut self, buf: &mut[u8; 512], count: usize) -> bool {
-        for c in buf[0..count].iter_mut() {
-            self.bytes += 1;
-            match self.state {
-                FPGAState::Prelude => {
-                    // Set bus speed to lower for programming the Ice40
-                    self.bus.prescale(15);
-                    if *c == 0x7E as u8 {
-                        self.reset();
-                        self.select();
-                        self.send(*c);
-                        self.state = FPGAState::Body;
-                    } else {
-                        //rprintln!("Prelude Byte {:02x}", * c);
-                        continue
-                    }
-                }
-                FPGAState::Body => {
-                    self.send(*c);
-                    if self.bytes == 135100 {
-                        self.state = FPGAState::Post;
-                    }
-                }
-                FPGAState::Post => {
-                    self.send(*c);
-                }
-            }
-        }
-        // TODO could end up in FPGAState::Body for 0x7E file < 135100 bytes
-        return if let FPGAState::Post = self.state {
-            for _ in 0..7 {
-                self.send(0x00 as u8);
-            }
-            self.deselect();
-            self.delay_ms(10_u8);
-            self.bytes = 0;
-            // Set bus speed higher for QSPI transfers
-            self.bus.prescale(15);
-            self.state = FPGAState::Prelude;
-            true
-        } else { false }
-    }
-
-    pub fn send(&mut self, byte: u8) {
-        let transaction = QspiTransaction {
-                        iwidth: QspiWidth::NONE,
-                        awidth: QspiWidth::NONE,
-                        dwidth: QspiWidth::SING,
-                        instruction: 0,
-                        address: None,
-                        dummy: 0,
-                        data_len: Some(1),
-                    };
-        self.bus.write(&[byte], transaction).unwrap();
-    }
 
     pub fn test_qspi(&mut self) {
         let count : u8 = 255;
@@ -660,8 +601,7 @@ let spi = Spi::new(device.SPI2,(fck, fso, fsi))
 
                         Command::SPI_FPGA_PROGRAM => { //program FPGA over qspi in single mode
                             (programmed).lock(|programmed | {
-                                //*programmed = ice.run(*command, &mut buf, count);
-                                *programmed = ice.prog(&mut buf, count);
+                                *programmed = ice.run(*command, &mut buf, count);
                                 if *programmed {
                                     *command = 0x00;
                                     rprintln!("Programed ILB");
