@@ -17,6 +17,7 @@ use stm32f7xx_hal::qspi::{Qspi, QspiTransaction, QspiWidth};
 use stm32f7xx_hal::spi::{Spi, Enabled};
 use stm32f7xx_hal::pac::SPI2;
 // use stm32f7xx_hal::gpio::{Speed};
+use rtt_target::{rprintln};
 
 pub type Hspi = Spi<SPI2, (
     Pin<'B',13,Alternate<5,PushPull>>,
@@ -24,11 +25,55 @@ pub type Hspi = Spi<SPI2, (
     Pin<'B',15,Alternate<5,PushPull>>),
     Enabled<u8>>;
 
+//Supported commands
+pub struct Command;
+
+#[allow(dead_code)]
+impl Command {
+    pub const NONE: u8 = 0x00;
+    pub const STM_FLASH_WRITE: u8 = 0x01;
+    pub const STM_FLASH_READ: u8 = 0x02;
+    pub const QSPI_BUS_WRITE: u8 = 0x03;
+    pub const QSPI_BUS_READ: u8 = 0x04;
+    pub const SPI_FLASH_WRITE: u8 = 0x05;
+    pub const SPI_FLASH_READ: u8 = 0x06;
+    pub const SPI_FPGA_PROGRAM: u8 = 0xFF;
+}
+
+pub struct ActionVar {
+    command: u8,
+    width: u8,
+    len: usize,
+    index: usize,
+    last_index: usize,
+    target: usize,
+}
+
+impl ActionVar {
+    fn new(command: u8, width :u8) -> Self {
+        Self { command, width, len: 0, index: 0, last_index: 0, target: 0 }
+    }
+}
+
+pub trait Device {
+    fn command(&mut self, command: u8, buf: &mut[u8], len: usize) -> usize;
+    fn write(&mut self, buf: &mut[u8], len: usize) -> usize;
+    fn read(&mut self, buf: &mut[u8], len: usize) -> usize;
+}
+
+pub trait Action {
+    fn run(&mut self, command: u8, buf: &mut[u8; 512], count: usize) -> bool;
+    fn prep(&mut self, buf: &mut[u8; 512]) -> bool;
+    fn act(&mut self, buf: &mut[u8; 512]);
+    fn complete(&mut self) -> bool;
+}
+
 pub struct Flash {
     ss: PB12<Output<PushPull>>,
     spi: Hspi,
 }
 impl Flash {
+    //TODO convert this to support Device + Action traits
     pub fn new(ss:PB12<Output<PushPull>>, spi:Hspi) -> Flash { Flash { ss, spi } }
 
     pub fn id(&mut self) -> u32 {
@@ -65,19 +110,135 @@ impl Flash {
         self.ss.set_high();
     }
 }
-enum FPGAState {
-    Prelude,
-    Body,
-    Post
-}
 
 pub struct Fpga {
-    bytes: u32,
-    state: FPGAState,
+    bytes:u32,
+    state:FPGAState,
+    var: ActionVar,
     ss: PB6<Output<PushPull>>,
     reset: PB4<Output<PushPull>>,
     delay: SysDelay,
     bus: Qspi
+}
+
+impl Action for Fpga {
+    fn run(&mut self, command: u8, buf: &mut[u8; 512], count: usize ) -> bool {
+        self.var.command = command;
+        self.var.len = count;
+        if !self.prep(buf) { return false };
+        while self.var.len > 0 {
+            self.act(buf) ;
+        }
+        if self.complete() {
+            if self.var.command == Command::SPI_FPGA_PROGRAM {
+                for _ in 0..5 { // Flush FPGA serial buffer and delay
+                    self.write(&mut[0x00, 0x00], 2);
+                }
+                self.delay_ms(10_u8);
+            }
+            self.deselect();
+            true
+        } else {false}
+    }
+
+    fn prep(&mut self, buf: &mut[u8; 512]) -> bool {
+        let mut head: usize = 9;
+        self.var.width = QspiWidth::QUAD;
+        self.bus.prescale(7);
+        self.var.target = usize::from(buf[5]) << 24 |
+            usize::from(buf[6]) << 16 |
+            usize::from(buf[7]) << 8 |
+            usize::from(buf[8]);
+
+        match self.var.command {
+            Command::SPI_FPGA_PROGRAM => {
+                self.var.width = QspiWidth::SING;
+                self.bus.prescale(15);
+                self.var.target = 135100 as usize;
+                head = 0;
+                while buf[head] != 0x7E as u8  {
+                    if head < self.var.len { head += 1 } else { rprintln!("Count {:08x}, head  {:08x}", self.var.len, head); return false }
+                }
+                self.reset();
+            }
+            Command::QSPI_BUS_WRITE => {
+                buf[2] &= 0b01111111;
+
+            }
+            Command::QSPI_BUS_READ => {
+                buf[2] |= 0b10000000;
+            }
+            _ => ()
+        }
+        self.select();
+        self.command(buf[2],&mut buf[3..5], 2);
+        self.var.index = head;
+        self.var.len -= head;
+        true
+    }
+
+    fn act(&mut self, buf: &mut[u8; 512]) {
+        let bytes = if self.var.len >= 2 { 2 } else { self.var.len };
+        for _t in 0..self.var.len/bytes {
+            self.var.last_index =  self.var.index;
+            self.var.index += bytes;
+            self.var.target -= self.write(&mut buf[self.var.last_index..self.var.index], bytes);
+            self.var.len -= bytes;
+        }
+    }
+
+    fn complete(&mut self) -> bool {
+        self.var.target == 0
+    }
+}
+
+impl Device for Fpga {
+    fn command(&mut self, command: u8, buf: &mut [u8], len: usize) -> usize {
+        let transaction = QspiTransaction {
+            iwidth: self.var.width,
+            awidth: QspiWidth::NONE,
+            dwidth: self.var.width,
+            instruction: command,
+            address: None,
+            dummy: 0,
+            data_len: Some(len),
+        };
+        self.bus.write(buf, transaction).unwrap();
+        len
+    }
+    fn write(&mut self, buf: &mut [u8], len: usize) -> usize {
+        let transaction = QspiTransaction {
+            iwidth: QspiWidth::NONE,
+            awidth: QspiWidth::NONE,
+            dwidth: self.var.width,
+            instruction: 0,
+            address: None,
+            dummy: 0,
+            data_len: Some(len),
+        };
+        self.bus.write(buf, transaction).unwrap();
+        len
+    }
+    fn read(&mut self, buf: &mut [u8], len: usize) -> usize {
+        let transaction = QspiTransaction {
+            iwidth: QspiWidth::NONE,
+            awidth: QspiWidth::NONE,
+            dwidth: self.var.width,
+            instruction: 0,
+            address: None,
+            dummy: 0,
+            data_len: Some(len),
+        };
+        self.bus.read(buf, transaction).unwrap();
+        len
+    }
+}
+
+//Depreciated, remove
+enum FPGAState {
+    Prelude,
+    Body,
+    Post
 }
 
 impl Fpga {
@@ -89,103 +250,12 @@ impl Fpga {
         Fpga {
             bytes:0,
             state:FPGAState::Prelude,
+            var: ActionVar::new(Command::NONE, QspiWidth::SING),
             ss,
             reset,
             delay,
             bus
         }
-    }
-
-    pub fn prog(&mut self, buf: &mut[u8; 512], count: usize) -> bool {
-        for c in buf[0..count].iter_mut() {
-            self.bytes += 1;
-            match self.state {
-                FPGAState::Prelude => {
-                    // Set bus speed to lower for programming the Ice40
-                    self.bus.prescale(15);
-                    if *c == 0x7E as u8 {
-                        self.reset();
-                        self.select();
-                        self.send(*c);
-                        self.state = FPGAState::Body;
-                    } else {
-                        //rprintln!("Prelude Byte {:02x}", * c);
-                        continue
-                    }
-                }
-                FPGAState::Body => {
-                    self.send(*c);
-                    if self.bytes == 135100 {
-                       self.state = FPGAState::Post;
-                    }
-                }
-                FPGAState::Post => {
-                    self.send(*c);
-                }
-            }
-        }
-        // TODO could end up in FPGAState::Body for 0x7E file < 135100 bytes
-        return if let FPGAState::Post = self.state {
-            for _ in 0..7 {
-                self.send(0x00 as u8);
-            }
-            self.deselect();
-            self.delay_ms(10_u8);
-            self.bytes = 0;
-            // Set bus speed higher for QSPI transfers
-            self.bus.prescale(15);
-            self.state = FPGAState::Prelude;
-            true
-        } else { false }
-    }
-
-    pub fn qbus_write(&mut self, buf: &mut[u8; 512], count: usize) -> bool {
-        const HEAD: usize = 9; // number of bytes in header CAAAALLLL
-        let mut len: usize = count;
-        let mut index: usize = 0;
-        while len > 0 {
-            match self.state {
-                FPGAState::Prelude => { // Header
-                    // let comad: u8 = buf[2] & 0b01111111;
-                    buf[2] &= 0b01111111;
-                    self.bytes = u32::from(buf[5]) << 24 |
-                        u32::from(buf[6]) << 16 |
-                        u32::from(buf[7]) << 8 |
-                        u32::from(buf[8]);
-                    self.select();
-                    // self.qbus_command(comad, &mut buf[3..5], 2);
-                    self.qbus_command(buf[2], &mut buf[3..5], 2);
-                    //self.qbus_wdata(&mut buf[2..5], 3);
-                    index = HEAD;
-                    len -= HEAD;
-                    self.state = FPGAState::Body;
-                }
-                FPGAState::Body => { // Data
-                    let mut old_index = index;
-                    if len > 1 {
-                        for _t in 0..len / 2 {
-                            old_index = index;
-                            index += 2;
-                            self.bytes -= self.qbus_wdata(&mut buf[old_index..index], 2);
-                            len -= 2;
-                        }
-                    } else {
-                        index += 1;
-                        self.bytes -= self.qbus_wdata(&mut buf[old_index..index], 1);
-                        len -= 1;
-                    }
-                }
-                FPGAState::Post => { // is this needed?
-                    self.deselect();
-                    self.state = FPGAState::Prelude;
-                }
-            }
-        }
-        if self.bytes == 0 {
-            self.deselect();
-            self.state = FPGAState::Prelude;
-            true
-        } else {false}
     }
 
     pub fn reset(&mut self) {
@@ -216,6 +286,49 @@ impl Fpga {
 
     fn delay_ms(&mut self, ms: u8) { self.delay.delay_ms(ms); }
 
+    pub fn prog(&mut self, buf: &mut[u8; 512], count: usize) -> bool {
+        for c in buf[0..count].iter_mut() {
+            self.bytes += 1;
+            match self.state {
+                FPGAState::Prelude => {
+                    // Set bus speed to lower for programming the Ice40
+                    self.bus.prescale(15);
+                    if *c == 0x7E as u8 {
+                        self.reset();
+                        self.select();
+                        self.send(*c);
+                        self.state = FPGAState::Body;
+                    } else {
+                        //rprintln!("Prelude Byte {:02x}", * c);
+                        continue
+                    }
+                }
+                FPGAState::Body => {
+                    self.send(*c);
+                    if self.bytes == 135100 {
+                        self.state = FPGAState::Post;
+                    }
+                }
+                FPGAState::Post => {
+                    self.send(*c);
+                }
+            }
+        }
+        // TODO could end up in FPGAState::Body for 0x7E file < 135100 bytes
+        return if let FPGAState::Post = self.state {
+            for _ in 0..7 {
+                self.send(0x00 as u8);
+            }
+            self.deselect();
+            self.delay_ms(10_u8);
+            self.bytes = 0;
+            // Set bus speed higher for QSPI transfers
+            self.bus.prescale(15);
+            self.state = FPGAState::Prelude;
+            true
+        } else { false }
+    }
+
     pub fn send(&mut self, byte: u8) {
         let transaction = QspiTransaction {
                         iwidth: QspiWidth::NONE,
@@ -228,157 +341,6 @@ impl Fpga {
                     };
         self.bus.write(&[byte], transaction).unwrap();
     }
-
-    pub fn qbus_command(&mut self, command: u8, buf: &mut[u8], len:usize) -> u32 {
-        //const MAX_REG: u32 = 0x0000_FFFF;
-        let read_nibbles = if command & 0b10000000 == 0 {0} else {2*len};
-        let transaction = QspiTransaction {
-            iwidth: QspiWidth::QUAD,
-            awidth: QspiWidth::NONE,
-            dwidth: QspiWidth::QUAD,
-            instruction: command,
-            address: None, // address
-            dummy: read_nibbles as u8,
-            data_len: Some(len),
-        };
-        self.bus.write(buf, transaction).unwrap();
-        len as u32
-    }
-
-    pub fn qbus_wdata(&mut self, buf: &mut[u8], len: usize) -> u32 {
-        let transaction = QspiTransaction {
-            iwidth: QspiWidth::NONE,
-            awidth: QspiWidth::NONE,
-            dwidth: QspiWidth::QUAD,//DUAL
-            instruction: 0,
-            address: None,
-            dummy: 0,
-            data_len: Some(len),
-        };
-        self.bus.write(buf, transaction).unwrap();
-        len as u32
-    }
-
-    pub fn qbus_rdata(&mut self, buf: &mut[u8], len: usize) -> u32 {
-        let transaction = QspiTransaction {
-            iwidth: QspiWidth::NONE,
-            awidth: QspiWidth::NONE,
-            dwidth: QspiWidth::QUAD,//DUAL
-            instruction: 0,
-            address: None,
-            dummy: 2*len as u8,
-            data_len: Some(len),
-        };
-        self.bus.write(buf, transaction).unwrap();
-        len as u32
-    }
-
-    // pub fn qbus1_send(&mut self, address: u32, byte: u8) {
-    //     let transaction = QspiTransaction {
-    //         iwidth: QspiWidth::SING,
-    //         awidth: QspiWidth::SING,
-    //         dwidth: QspiWidth::SING,//DUAL
-    //         instruction: 0,
-    //         address: Some(address),
-    //         dummy: 0,
-    //         data_len: Some(1),
-    //     };
-    //     self.ss.set_low();
-    //     self.bus.write(&[byte], transaction).unwrap();
-    //     self.ss.set_high();
-    // }
-    //
-    // pub fn qbus_reg(&mut self, command: u8, address: u32, buf: &mut[u8; 1]) {
-    //     //let mut nibbles= if let (command & 0x80) == 0 {0} else {2}
-    //     let read_nibbles = if command & 0x80 == 0 {0} else {2};
-    //     let transaction = QspiTransaction {
-    //         iwidth: QspiWidth::QUAD,
-    //         awidth: QspiWidth::QUAD,
-    //         dwidth: QspiWidth::QUAD,
-    //         instruction: command,
-    //         address: Some(address),
-    //         dummy: read_nibbles,
-    //         data_len: Some(1),
-    //     };
-    //     self.ss.set_low();
-    //     self.bus.write(buf, transaction).unwrap();
-    //     self.ss.set_high();
-    // }
-    //
-    // pub fn qbus_address(&mut self, address: u32, byte: u8) {
-    //     let transaction = QspiTransaction {
-    //         iwidth: QspiWidth::QUAD,
-    //         awidth: QspiWidth::QUAD,
-    //         dwidth: QspiWidth::QUAD,
-    //         instruction: 0,
-    //         address: Some(address),
-    //         dummy: 0,
-    //         data_len: Some(1),
-    //     };
-    //     self.bus.write(&[byte], transaction).unwrap();
-    // }
-    //
-    // pub fn qbus_send(&mut self, buf: &mut[u8; 16], len: usize) {
-    //     let transaction = QspiTransaction {
-    //         iwidth: QspiWidth::NONE,
-    //         awidth: QspiWidth::NONE,
-    //         dwidth: QspiWidth::QUAD,
-    //         instruction: 0,
-    //         address: None,
-    //         dummy: 0,
-    //         data_len: Some(len),
-    //     };
-    //     self.bus.write(buf, transaction).unwrap();
-    // }
-
-    // pub fn bus_send(&mut self, address:u32, buf: &mut[u8; 16], len: usize) {
-    //     const MAX_REG: u32 = 0x0000_FFFF;
-    //     let transaction = QspiTransaction {
-    //         iwidth: QspiWidth::NONE,
-    //         awidth: QspiWidth::QUAD,
-    //         dwidth: QspiWidth::QUAD,//DUAL
-    //         instruction: 0,
-    //         address: Some(address as u32 & MAX_REG),
-    //         dummy: 0,
-    //         data_len: Some(len),
-    //     };
-    //     //rprintln!("count:{}",_count as u8);
-    //     //let mut buf = [_count as u8];
-    //     self.ss.set_low();
-    //     self.bus.write(buf, transaction).unwrap();
-    //     self.ss.set_high();
-    // }
-    //
-    // pub fn val_send(&mut self, byte: u8) {
-    //     let transaction = QspiTransaction {
-    //         iwidth: QspiWidth::NONE,
-    //         awidth: QspiWidth::NONE,
-    //         dwidth: QspiWidth::QUAD,//DUAL
-    //         instruction: 0,
-    //         address: None,
-    //         dummy: 0,
-    //         data_len: Some(1),
-    //     };
-    //     self.ss.set_low();
-    //     self.bus.write(&[byte], transaction).unwrap();
-    //     self.ss.set_high();
-    // }
-    //
-    // pub fn reg_send(&mut self, reg: u8, byte: u8) {
-    //     const MAX_REG: u32 = 0x0000_00FF;
-    //     let transaction = QspiTransaction {
-    //         iwidth: QspiWidth::NONE,
-    //         awidth: QspiWidth::QUAD,
-    //         dwidth: QspiWidth::QUAD,//DUAL
-    //         instruction: 0,
-    //         address: Some(reg as u32 & MAX_REG),
-    //         dummy: 0,
-    //         data_len: Some(1),
-    //     };
-    //     self.ss.set_low();
-    //     self.bus.write(&[byte], transaction).unwrap();
-    //     self.ss.set_high();
-    // }
 
     pub fn test_qspi(&mut self) {
         let count : u8 = 255;
@@ -414,8 +376,7 @@ impl Fpga {
 
 #[app(device = stm32f7xx_hal::pac, peripherals = true, dispatchers = [LP_TIMER1])]
 mod app {
-    use crate::Fpga;
-    use crate::Flash;
+    use crate::{Action, Command, Flash, Fpga};
     // use crate::{PushPull, Output};
     // use stm32f7::stm32f730::{EXTI};
     use stm32f7xx_hal::{pac, prelude::*};
@@ -655,38 +616,60 @@ let spi = Spi::new(device.SPI2,(fck, fso, fsi))
                         *command = buf[0];
                     }
                     match *command {
-                        0xFF => { //rogram FPGA
+                        Command::STM_FLASH_WRITE => { //TODO
+                            rprintln!("STM Flash write not implemented");
+                            *command = 0x00;
+                        }
+                        Command::STM_FLASH_READ => { //TODO
+                            rprintln!("STM Flash read not implemented");
+                            *command = 0x00;
+                        }
+                        Command::QSPI_BUS_WRITE => { //Write QSPI bit should 0
+                            rprintln!("Transferring data {} bytes", count);
+                            if ice.run(*command, &mut buf, count) {
+                                *command = 0x00;
+                                rprintln!("Transferred data to ILB");
+
+                            }
+                        }
+                        Command::QSPI_BUS_READ => { //Read QSPI bit should 1
+                            rprintln!("ILB qbus Read not implemented");
+                            *command = 0x00;
+                            let bytes = buf[8] as usize;
+                            for b in 0..bytes {
+                                buf[b] = b as u8;
+                            }
+                            let mut write_offset = 0;
+                            while write_offset < bytes {
+                                match serial.write(&buf[write_offset..bytes]) {
+                                    Ok(len) if len > 0 => {
+                                        write_offset += len;
+                                    }
+                                    _ => {}
+                                }
+                            }
+                        }
+                        Command::SPI_FLASH_WRITE => {//TODO
+                            rprintln!("SPI Flash write not implemented");
+                            *command = 0x00;
+                        }
+                        Command::SPI_FLASH_READ => {//TODO
+                            rprintln!("SPI Flash read not implemented");
+                            *command = 0x00;
+                        }
+
+                        Command::SPI_FPGA_PROGRAM => { //program FPGA over qspi in single mode
                             (programmed).lock(|programmed | {
+                                //*programmed = ice.run(*command, &mut buf, count);
                                 *programmed = ice.prog(&mut buf, count);
                                 if *programmed {
                                     *command = 0x00;
-                                        rprintln!("Programed ILB");
+                                    rprintln!("Programed ILB");
+
                                     // ice.delay_ms(100_u8);
                                     // ice.test_qspi();
                                 }
                             });
-                        }
-                        0x01 => { // Write spi flash
-                            rprintln!("SPI Flash write not implemented");
-                            *command = 0x00;
-                        }
-                        0x02 => { // Read spi flash
-                            rprintln!("SPI Flash read not implemented");
-                            *command = 0x00;
-                        }
-                        0x03 => { //Write QSPI bit should 0
-                            rprintln!("Transferring data {} bytes", count);
-                            if ice.qbus_write(&mut buf, count) {
-                                *command = 0x00;
-                                rprintln!("Transferred data to ILB");
-                            }
-                        }
-                        0x04 => { //Read QSPI bit should 1
-                            rprintln!("ILB qbus Read not implemented");
-                            // let comad : u8 = 0b10000000 | (buf[2] & 0b01111111);
-                            // let address:u32 = u32::from(buf[3]) << 8 |
-                            //                     u32::from(buf[4]);
-                            *command = 0x00;
                         }
                         _ => {rprintln!("No command, count:{} bytes",count as u8);}
                     }
