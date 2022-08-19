@@ -3,321 +3,28 @@
 #![no_main]
 #![no_std]
 
+pub mod control;
+pub mod flash;
+pub mod fpga;
+
 // extern crate panic_itm;
 use rtic::{app};
 //use stm32f7xx_hal::gpio::gpiob::{PB3, PB4};
 //use stm32f7xx_hal::gpio::gpioc::PC13;
 //use stm32f7xx_hal::gpio::gpiod::{PD11};
 //use stm32f7xx_hal::delay::Delay;
-use stm32f7xx_hal::timer::{SysDelay};
-use stm32f7xx_hal::gpio::{Alternate, Pin,PushPull, Output, PB6, PB4, PB12};
 //use stm32f7xx_hal::gpio::gpioe::{PE11, PE12, PE13};
-use stm32f7xx_hal::prelude::*;
-use stm32f7xx_hal::qspi::{Qspi, QspiTransaction, QspiWidth};
-use stm32f7xx_hal::spi::{Spi, Enabled};
-use stm32f7xx_hal::pac::SPI2;
+//use stm32f7xx_hal::prelude::*;
+
 // use stm32f7xx_hal::gpio::{Speed};
-use rtt_target::{rprintln};
-
-pub type Hspi = Spi<SPI2, (
-    Pin<'B',13,Alternate<5,PushPull>>,
-    Pin<'B',14,Alternate<5,PushPull>>,
-    Pin<'B',15,Alternate<5,PushPull>>),
-    Enabled<u8>>;
-
-//Supported commands
-pub struct Command;
-
-#[allow(dead_code)]
-impl Command {
-    pub const NONE: u8 = 0x00;
-    pub const STM_FLASH_WRITE: u8 = 0x01;
-    pub const STM_FLASH_READ: u8 = 0x02;
-    pub const QSPI_BUS_WRITE: u8 = 0x03;
-    pub const QSPI_BUS_READ: u8 = 0x04;
-    pub const SPI_FLASH_WRITE: u8 = 0x05;
-    pub const SPI_FLASH_READ: u8 = 0x06;
-    pub const SPI_FPGA_PROGRAM: u8 = 0xFF;
-}
-
-pub struct ActionVar {
-    command: u8,
-    width: u8,
-    len: usize,
-    index: usize,
-    last_index: usize,
-    target: usize,
-}
-
-impl ActionVar {
-    fn new(command: u8, width :u8) -> Self {
-        Self { command, width, len: 0, index: 0, last_index: 0, target: 0 }
-    }
-}
-
-pub trait Device {
-    fn command(&mut self, command: u8, buf: &mut[u8], len: usize) -> usize;
-    fn write(&mut self, buf: &mut[u8], len: usize) -> usize;
-    fn read(&mut self, buf: &mut[u8], len: usize) -> usize;
-}
-
-pub trait Action {
-    fn run(&mut self, command: u8, buf: &mut[u8; 512], count: usize) -> bool;
-    fn prep(&mut self, buf: &mut[u8; 512]) -> bool;
-    fn act(&mut self, buf: &mut[u8; 512]);
-    fn complete(&mut self) -> bool;
-}
-
-pub struct Flash {
-    ss: PB12<Output<PushPull>>,
-    spi: Hspi,
-}
-impl Flash {
-    //TODO convert this to support Device + Action traits
-    pub fn new(ss:PB12<Output<PushPull>>, spi:Hspi) -> Flash { Flash { ss, spi } }
-
-    pub fn id(&mut self) -> u32 {
-        let mut idc:[u8;4] = [0x00, 0x00, 0x00, 0x00];
-        idc[0] = 0xAB;
-        self.ss.set_low();
-        self.spi.transfer(&mut idc).unwrap();
-        self.ss.set_high();
-        idc[0] = 0x9F;
-        self.ss.set_low();
-        self.spi.transfer(&mut idc).unwrap();
-        self.ss.set_high();
-        return u32::from(idc[1]) << 16 | u32::from(idc[2]) << 8 | u32::from(idc[3]);
-    }
-
-    pub fn transfer(&mut self, data: &mut[u8;4]) {
-        rprintln!("SPI Flash transfer");
-        self.ss.set_low();
-        self.spi.transfer(&mut data.as_mut_slice()).unwrap();
-        self.ss.set_high();
-    }
-
-    pub fn write(&mut self, data: &mut[u8;4]) {
-        // ToDo
-        // Erase mem first
-        self.ss.set_low();
-        self.spi.write(&mut data.as_mut_slice()).unwrap();
-        self.ss.set_high();
-    }
-
-    pub fn read(&mut self, data: &mut[u8;4]) {
-        // ToDo
-        self.ss.set_low();
-        self.spi.transfer(&mut data.as_mut_slice()).unwrap();
-        self.ss.set_high();
-    }
-}
-
-pub struct Fpga {
-    var: ActionVar,
-    ss: PB6<Output<PushPull>>,
-    reset: PB4<Output<PushPull>>,
-    delay: SysDelay,
-    bus: Qspi
-}
-
-impl Action for Fpga {
-    fn run(&mut self, command: u8, buf: &mut[u8; 512], count: usize ) -> bool {
-        self.var.command = command;
-        self.var.len = count;
-        self.var.index = 0;
-        if self.var.target == 0 {
-            if !self.prep(buf) { return false };
-        }
-        while self.var.len > 0 {
-            self.act(buf) ;
-        }
-        if self.complete() {
-            if self.var.command == Command::SPI_FPGA_PROGRAM {
-                for _ in 0..5 { // Flush FPGA serial buffer and delay
-                    self.write(&mut[0x00, 0x00], 2);
-                }
-                self.delay_ms(10_u8);
-            }
-            self.deselect();
-            true
-        } else {false}
-    }
-
-    fn prep(&mut self, buf: &mut[u8; 512]) -> bool {
-        let mut head: usize = 9;
-        self.var.width = QspiWidth::QUAD;
-        self.bus.prescale(7);
-        self.var.target = usize::from(buf[5]) << 24 |
-            usize::from(buf[6]) << 16 |
-            usize::from(buf[7]) << 8 |
-            usize::from(buf[8]);
-
-        match self.var.command {
-            Command::SPI_FPGA_PROGRAM => {
-                self.var.width = QspiWidth::SING;
-                self.bus.prescale(15);
-                self.var.target = 135100 as usize;
-                head = 0;
-                while buf[head] != 0x7E as u8  {
-                    if head < self.var.len { head += 1 } else { return false }
-                }
-                self.select();
-                self.var.target-= head - 1;
-                self.var.target -= self.write(&mut buf[head-1..head], 1);
-                self.reset();
-            }
-            Command::QSPI_BUS_WRITE => {
-                buf[2] &= 0b01111111;
-                self.select();
-                self.command(buf[2],&mut buf[3..5], 2);
-            }
-            Command::QSPI_BUS_READ => {
-                buf[2] |= 0b10000000;
-                self.select();
-                self.command(buf[2],&mut buf[3..5], 2);
-            }
-            _ => ()
-        }
-        self.var.index = head;
-        self.var.len -= head;
-        true
-    }
-
-    fn act(&mut self, buf: &mut[u8; 512]) {
-        let bytes = if self.var.len >= 2 { 2 } else { self.var.len };
-        for _t in 0..self.var.len/bytes {
-            self.var.last_index =  self.var.index;
-            self.var.index += bytes;
-            self.var.target -= self.write(&mut buf[self.var.last_index..self.var.index], bytes);
-            self.var.len -= bytes;
-        }
-    }
-
-    fn complete(&mut self) -> bool {
-        self.var.target == 0
-    }
-}
-
-impl Device for Fpga {
-    fn command(&mut self, command: u8, buf: &mut [u8], len: usize) -> usize {
-        let transaction = QspiTransaction {
-            iwidth: self.var.width,
-            awidth: QspiWidth::NONE,
-            dwidth: self.var.width,
-            instruction: command,
-            address: None,
-            dummy: 0,
-            data_len: Some(len),
-        };
-        self.bus.write(buf, transaction).unwrap();
-        len
-    }
-    fn write(&mut self, buf: &mut [u8], len: usize) -> usize {
-        let transaction = QspiTransaction {
-            iwidth: QspiWidth::NONE,
-            awidth: QspiWidth::NONE,
-            dwidth: self.var.width,
-            instruction: 0,
-            address: None,
-            dummy: 0,
-            data_len: Some(len),
-        };
-        self.bus.write(buf, transaction).unwrap();
-        len
-    }
-    fn read(&mut self, buf: &mut [u8], len: usize) -> usize {
-        let transaction = QspiTransaction {
-            iwidth: QspiWidth::NONE,
-            awidth: QspiWidth::NONE,
-            dwidth: self.var.width,
-            instruction: 0,
-            address: None,
-            dummy: 0,
-            data_len: Some(len),
-        };
-        self.bus.read(buf, transaction).unwrap();
-        len
-    }
-}
-
-impl Fpga {
-    pub fn new(
-               ss: PB6<Output<PushPull>>,
-               reset: PB4<Output<PushPull>>,
-               delay: SysDelay,
-               bus : Qspi) -> Fpga {
-        Fpga {
-            var: ActionVar::new(Command::NONE, QspiWidth::SING),
-            ss,
-            reset,
-            delay,
-            bus
-        }
-    }
-
-    pub fn reset(&mut self) {
-        self.ss.set_high();
-        self.reset.set_low();
-        self.ss.set_low();
-        self.delay.delay_ms(1_u8);
-        self.reset.set_high();
-        self.delay.delay_ms(2_u8);
-        self.ss.set_high();
-        self.delay.delay_ms(50_u8);
-
-        let transaction = QspiTransaction {
-                        iwidth: QspiWidth::NONE,
-                        awidth: QspiWidth::NONE,
-                        dwidth: QspiWidth::SING,
-                        instruction: 0,
-                        address: None,
-                        dummy: 0,
-                        data_len: Some(8),
-                    };
-        self.bus.write(&[0,0,0,0,0,0,0,0], transaction).unwrap();
-    }
-
-    pub fn select(&mut self) { self.ss.set_low(); }
-
-    pub fn deselect(&mut self) { self.ss.set_high(); }
-
-    fn delay_ms(&mut self, ms: u8) { self.delay.delay_ms(ms); }
-
-    pub fn test_qspi(&mut self) {
-        let count : u8 = 255;
-        for _count  in 0..count {
-            let transaction = QspiTransaction {
-                iwidth: QspiWidth::NONE,
-                awidth: QspiWidth::NONE,
-                dwidth: QspiWidth::QUAD,//DUAL
-                instruction: 0,
-                address: None,
-                dummy: 0,
-                data_len: Some(1),
-            };
-            //rprintln!("count:{}",_count as u8);
-            //let mut buf = [_count as u8];
-            self.ss.set_low();
-            self.bus.write(&[_count], transaction).unwrap();
-            self.ss.set_high();
-            for _ in 0..100_000 {
-                cortex_m::asm::nop();
-            }
-        }
-    }
-
-    // fn transfer(&mut self, byte: u8) {
-    //     self.select();
-    //     self.send(byte);
-    //     self.deselect();
-    // }
-
-
-}
+//use rtt_target::{rprintln};
+use control::{Action, Command};
+use fpga::Fpga;
+use flash::Flash;
 
 #[app(device = stm32f7xx_hal::pac, peripherals = true, dispatchers = [LP_TIMER1])]
 mod app {
-    use crate::{Action, Command, Flash, Fpga};
+    use crate::{Command, Action, Fpga, Flash};
     // use crate::{PushPull, Output};
     // use stm32f7::stm32f730::{EXTI};
     use stm32f7xx_hal::{pac, prelude::*};
@@ -437,7 +144,7 @@ mod app {
             .mco1(MCO1::Hse)
             .freeze();
 
-let spi = Spi::new(device.SPI2,(fck, fso, fsi))
+        let spi = Spi::new(device.SPI2,(fck, fso, fsi))
             .enable(
                 Mode{polarity: Polarity::IdleLow, phase: Phase::CaptureOnFirstTransition},
                 1_000_000.Hz(),
