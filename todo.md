@@ -49,4 +49,5 @@
 - [ ] Update Tile specifications repo
 - [ ] Add Micro Blade repo
 - [ ] Increase Tile hole size 0.1mm
+- [ ] usb ids for DAPLink New USB device found, idVendor=c251, idProduct=f001, bcdDevice= 1.00
 - 

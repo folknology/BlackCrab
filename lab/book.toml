@@ -1,0 +1,6 @@
+[book]
+authors = ["Folknology"]
+language = "en"
+multilingual = false
+src = "src"
+title = "BlackCrab Labnotes"

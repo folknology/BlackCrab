@@ -13,3 +13,12 @@ Cargo.lock
 # Added by cargo
 
 /target
+.vscode/settings.json
+.vscode/dryrun.log
+.vscode/targets.log
+.vscode/configurationCache.log
+.idea/vcs.xml
+.idea/modules.xml
+.idea/misc.xml
+.idea/inspectionProfiles/profiles_settings.xml
+.idea/BlackCrab.iml
