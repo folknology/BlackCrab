@@ -1,5 +1,8 @@
 #Debugnotes
 - [ ] Probe RS VSCode https://github.com/probe-rs/vscode/releases/tag/v0.4.0
+```bash
+code --install-extension probe-rs-debugger-0.4.0.vsix
+```
 - [ ] Setup https://probe.rs/docs/tools/vscode/#installation
 
 Launch configuration
