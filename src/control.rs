@@ -4,12 +4,12 @@ pub struct Command;
 #[allow(dead_code)]
 impl Command {
     pub const NONE: u8 = 0x00;
-    pub const STM_FLASH_WRITE: u8 = 0x01;
-    pub const STM_FLASH_READ: u8 = 0x02;
     pub const QSPI_BUS_WRITE: u8 = 0x03;
     pub const QSPI_BUS_READ: u8 = 0x04;
-    pub const SPI_FLASH_WRITE: u8 = 0x05;
-    pub const SPI_FLASH_READ: u8 = 0x06;
+    pub const SPI_FLASH_READ: u8 = 0x05;
+    pub const SPI_FLASH_WRITE: u8 = 0x06;
+    pub const SPI_FLASH_ERASE: u8 = 0x07;
+    pub const SPI_FLASH_PROGRAM: u8 = 0x08;
     pub const SPI_FPGA_PROGRAM: u8 = 0xFF;
 }
 

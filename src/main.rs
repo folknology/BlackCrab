@@ -20,11 +20,11 @@ use rtic::{app};
 //use rtt_target::{rprintln};
 use control::{Action, Command};
 use fpga::Fpga;
-use flash::Flash;
+use flash::{Flash, FlashDevice};
 
 #[app(device = stm32f7xx_hal::pac, peripherals = true, dispatchers = [LP_TIMER1])]
 mod app {
-    use crate::{Command, Action, Fpga, Flash};
+    use crate::{FlashDevice, Command, Action, Fpga, Flash};
     // use crate::{PushPull, Output};
     // use stm32f7::stm32f730::{EXTI};
     use stm32f7xx_hal::{pac, prelude::*};
@@ -151,7 +151,7 @@ mod app {
                 &clocks,
                 &mut rcc_constrain.apb1
             );
-        let mut flash = Flash{ ss: fss, spi };
+        let mut flash = Flash::new(fss, spi);
         //let mut delay = Delay::new(core.SYST, clocks);
         let mut delay = core.SYST.delay(&clocks);
 
@@ -205,6 +205,13 @@ mod app {
 
         let ice = Fpga::new(ss, reset, delay, bus);
         rprintln!("Flash Id {:08x}", flash.id());
+
+        let mut buf: [u8; 512] = [0u8; 512];
+        let count: usize = 1;
+        let cmd = FlashDevice::READ;
+
+        let _read = flash.run(cmd, &mut buf, count);
+        rprintln!("Flash byte {:02x}", buf[0]);
         rprintln!("Init finishing");
 
         // rtic::pend(Interrupt::OTG_FS)
@@ -264,14 +271,6 @@ mod app {
                         *command = buf[0];
                     }
                     match *command {
-                        Command::STM_FLASH_WRITE => { //TODO
-                            rprintln!("STM Flash write not implemented");
-                            *command = 0x00;
-                        }
-                        Command::STM_FLASH_READ => { //TODO
-                            rprintln!("STM Flash read not implemented");
-                            *command = 0x00;
-                        }
                         Command::QSPI_BUS_WRITE => { //Write QSPI bit should 0
                             rprintln!("Transferring data {} bytes", count);
                             if ice.run(*command, &mut buf, count) {
