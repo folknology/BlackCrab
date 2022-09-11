@@ -36,6 +36,18 @@ Launch configuration
                     "coreIndex": 0,
                     "programBinary": "${workspaceFolder}/target/thumbv7em-none-eabihf/debug/black_crab", //!MODIFY
                     "svdFile": "../cmsis-svd/data/STMicro/STM32F7x.svd", //!MODIFY
+                    "rttEnabled": true,
+                    "rttChannelFormats": [
+                        {
+                            "channelNumber": 0,
+                            "dataFormat": "String", // Format RTT data as String data
+                            "showTimestamps": true  // Include host-side timestamps for every line of data transferred from the target RTT output
+                        },
+                        {
+                            "channelNumber": 1,
+                            "dataFormat": "BinaryLE" // Treat data as raw binary data, and do not format in any way
+                        }
+                    ]
                 }
             ],
             "consoleLogLevel": "Info", //Error, Warn, Info, Debug, Trace 
