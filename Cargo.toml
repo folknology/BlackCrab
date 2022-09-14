@@ -48,12 +48,13 @@ rtt-target = { version = "0.3.1", features = ["cortex-m"] }
 panic-probe = { version = "0.2", features = ["print-rtt"] }
 
 [profile.dev]
-debug = 1 # default is `true`; not needed if not already overridden
+debug = 2 # default is `true`; not needed if not already overridden
 opt-level = "z"  # Optimize for size.
-#strip = true  # Automatically strip symbols from the binary.
+
 #
 [profile.release]
 debug = 1 # default is `false`; using `true` is also OK as symbols reside on the host, not the target
+#strip = true  # Automatically strip symbols from the binary.
 
 [features]
 device-selected = []

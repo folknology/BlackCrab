@@ -51,7 +51,7 @@ impl Action for Fpga {
             Command::SPI_FPGA_PROGRAM => {
                 self.var.width = QspiWidth::SING;
                 self.bus.prescale(15);
-                self.var.target = 135100 as usize;
+                self.var.target = crate::IMGSIZE;//135100 as usize;
                 head = 0;
                 while buf[head] != 0x7E as u8  {
                     if head < self.var.len { head += 1 } else { return false }

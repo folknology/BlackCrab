@@ -49,7 +49,7 @@ impl Action for Flash {
         // }
         // while self.var.len > 0 {
         //     self.act(buf) ;
-        // }
+        // } 
 
         self.ss.set_low();
         self.spi.write(&mut [FlashDevice::WRITEENABLE]).unwrap();
@@ -79,7 +79,34 @@ impl Action for Flash {
     }
 
     fn prep(&mut self, _buf: &mut[u8; 512]) -> bool {
-        //TODO:
+        //TODO: Test this
+        //let fraction = crate::IMGSIZE as u16 % FlashDevice::SECTOR;
+        let sectors = (crate::IMGSIZE as u16 + FlashDevice::SECTOR - 1) / FlashDevice::SECTOR;
+        let mut address: u32 = 0;
+        let mut rsl:[u8;2] = [FlashDevice::READSRLSB, 0x00];
+        let mut idc:[u8;4] = [0x00, 0x00, 0x00, 0x00];
+        //erase sectors
+        for _s in 0..sectors {    
+            self.ss.set_low();
+            self.spi.write(&mut [FlashDevice::WRITEENABLE]).unwrap();
+            self.ss.set_high();
+            idc[0] = FlashDevice::ERASE4K;
+            idc[1] = ((address & 0x00FF0000) >> 16) as u8;
+            idc[2] = ((address & 0x0000FF00) >> 8) as u8;
+            idc[3] = ((address & 0x000000FF)) as u8;
+            self.ss.set_low();
+            self.spi.write(&mut idc).unwrap();
+            self.ss.set_high();
+            loop {
+                self.ss.set_low();
+                self.spi.write(&mut rsl).unwrap();
+                self.ss.set_high();
+                if (rsl[1] & 0x01) == 0x00  {
+                    break;
+                }
+            }
+            address += FlashDevice::SECTOR as u32;
+        }
         false
     }
 

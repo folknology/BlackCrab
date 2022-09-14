@@ -22,6 +22,9 @@ use control::{Action, Command};
 use fpga::Fpga;
 use flash::{Flash, FlashDevice};
 
+#[allow(dead_code)]
+pub static IMGSIZE: usize =135100;
+
 #[app(device = stm32f7xx_hal::pac, peripherals = true, dispatchers = [LP_TIMER1])]
 mod app {
     use crate::{FlashDevice, Command, Action, Fpga, Flash};

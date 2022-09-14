@@ -9,7 +9,7 @@
             "name": "probe_rs debug",
             "cwd": "${workspaceFolder}",
             "connectUnderReset": true,
-            "speed": 24000, //!MODIFY (or remove)
+            // "speed": 24000, //!MODIFY (or remove)
             //"probe": "0483:374f:<Serial>", //!MODIFY (or remove)
             "runtimeExecutable": "probe-rs-debugger",
             "runtimeArgs": [
